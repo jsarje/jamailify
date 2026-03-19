@@ -52,12 +52,12 @@ func (c *Client) Close() {
 
 func (c *Client) ListMessages() ([]MessageInfo, error) {
 	var messages []MessageInfo
-	msgs, err := c.conn.Uidl()
+	msgs, err := c.conn.Uidl(0)
 	if err != nil {
 		return nil, err
 	}
 	for k, v := range msgs {
-		messages = append(messages, MessageInfo{SeqNum: k, UID: v})
+		messages = append(messages, MessageInfo{SeqNum: k, UID: v.UID})
 	}
 	return messages, nil
 }
