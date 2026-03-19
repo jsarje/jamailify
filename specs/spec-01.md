@@ -9,7 +9,7 @@ Write a complete, production-ready Golang application that acts as a self-hosted
 * **Authentication:** The app will use OAuth2 `refresh_token`s (provided in the config) to automatically generate short-lived access tokens for the Gmail API. No web server or manual OAuth flow should be in this codebase (tokens are pre-generated).
 
 ## Required Third-Party Libraries
-* POP3 Client: `github.com/emersion/go-pop3`
+* POP3 Client: `github.com/knadh/go-pop3`
 * SQLite Driver: `github.com/mattn/go-sqlite3`
 * Google OAuth: `golang.org/x/oauth2` and `golang.org/x/oauth2/google`
 * Gmail API: `google.golang.org/api/gmail/v1`
@@ -20,6 +20,8 @@ The application must parse this exact `config.json` structure:
 ```json
 {
   "poll_interval_minutes": 10,
+  "google_client_id": "YOUR_CLIENT_ID",
+  "google_client_secret": "YOUR_CLIENT_SECRET",
   "accounts": [
     {
       "name": "User 1",
@@ -41,7 +43,7 @@ Please divide the logic into logical Go files/packages or clean functions within
 * Function: `MarkSynced(accountName, uid string) error`
 
 **2. Gmail API Client (`gmail_client`)**
-* Function to initialize the Gmail service using a hardcoded OAuth client configuration (assuming standard Google Cloud Desktop App credentials) and the user's specific `refresh_token` from the config.
+* Function to initialize the Gmail service using the OAuth client configuration from `config.json` and the user's specific `refresh_token`.
 * Function: `PushEmail(rawRFC2822 []byte) error`. This must use the `Users.Messages.Insert` endpoint to bypass Gmail filters and place the message directly in the inbox.
 * **Crucial Detail:** The Gmail API requires the raw email bytes to be base64url encoded (without padding) inside the `gmail.Message{Raw: ...}` payload.
 
