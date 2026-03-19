@@ -89,7 +89,7 @@ func syncAccount(account config.Account, cfg *config.Config, db *database.DB) {
 		}
 
 		if err := gmailClient.PushEmail(rawEmail); err != nil {
-			log.Printf("[%s] ERROR: Failed to push email with UID %s to Gmail: %v", account.Name, err)
+			log.Printf("[%s] ERROR: Failed to push email with UID %s to Gmail: %v", account.Name, msg.UID, err)
 			continue
 		}
 
