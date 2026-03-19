@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -30,13 +29,13 @@ func main() {
 	// AccessTypeOffline is REQUIRED to get a refresh token
 	// ApprovalForce forces the consent screen so a refresh token is always returned
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline, oauth2.ApprovalForce)
-	
+
 	fmt.Println("=====================================================================")
 	fmt.Printf("Go to the following link in your browser:\n\n%v\n\n", authURL)
 	fmt.Println("=====================================================================")
 	fmt.Println("Log in with the Gmail account you want to push emails TO.")
 	fmt.Println("Ignore the 'Google hasn't verified this app' warning (click Advanced -> Continue).")
-	fmt.Println("Type the authorization code here and press Enter:")
+	fmt.Println("Type the authorization code here (will be in the query string of URL) and press Enter:")
 
 	// 4. Get the auth code from the user
 	var authCode string
@@ -56,5 +55,4 @@ func main() {
 	fmt.Printf("Refresh Token: %s\n", tok.RefreshToken)
 	fmt.Println("---------------------------------------------------------------------")
 	fmt.Println("Copy that Refresh Token into your config.json.")
-	fmt.Println("You can run this script again and log in as your wife to get hers.")
 }
