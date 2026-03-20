@@ -99,7 +99,7 @@ func TestLoadConfig(t *testing.T) {
 		},
 		{
 			name:          "Missing file",
-			path:        "non_existent_file.json",
+			path:          "non_existent_file.json",
 			expectError:   true,
 			expectedError: "",
 		},
@@ -109,9 +109,9 @@ func TestLoadConfig(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name:        "Missing required fields",
-			path:        missingFieldsConfigFile.Name(),
-			expectError: true, 
+			name:          "Missing required fields",
+			path:          missingFieldsConfigFile.Name(),
+			expectError:   true,
 			expectedError: "pop3_server is required",
 		},
 	}

@@ -33,7 +33,9 @@ func NewClient(host string, port int, user, pass string, useTLS bool) (*Client, 
 	}
 
 	if err := c.Auth(user, pass); err != nil {
-		c.Quit()
+		if qerr := c.Quit(); qerr != nil {
+			return nil, fmt.Errorf("auth for user %s: %v; quit error: %w", user, err, qerr)
+		}
 		return nil, fmt.Errorf("auth for user %s: %w", user, err)
 	}
 

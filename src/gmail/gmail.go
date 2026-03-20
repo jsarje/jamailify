@@ -3,17 +3,13 @@ package gmail
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 
 	"golang.org/x/oauth2"
-
 	"golang.org/x/oauth2/google"
 
 	"google.golang.org/api/gmail/v1"
-
 	"google.golang.org/api/googleapi"
-
-	"fmt"
-
 	"google.golang.org/api/option"
 )
 
