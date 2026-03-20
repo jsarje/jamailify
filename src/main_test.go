@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"jamailify/src/config"
 	"jamailify/src/pop3"
@@ -47,7 +48,7 @@ type mockGmailClient struct {
 	shouldError  bool
 }
 
-func (m *mockGmailClient) PushEmail(rawEmail []byte) error {
+func (m *mockGmailClient) PushEmail(ctx context.Context, rawEmail []byte) error {
 	if m.shouldError {
 		return errors.New("failed to push email")
 	}
@@ -71,7 +72,7 @@ func TestRunSingleSync_HappyPath(t *testing.T) {
 	}
 	gmailClient := &mockGmailClient{}
 
-	RunSingleSync(account, cfg, db, pop3Client, gmailClient)
+	RunSingleSync(context.Background(), account, cfg, db, pop3Client, gmailClient)
 
 	assert.Len(t, gmailClient.pushedEmails, 2)
 	assert.True(t, db.syncedUIDs["uid1"])
@@ -95,7 +96,7 @@ func TestRunSingleSync_PartialSync(t *testing.T) {
 	}
 	gmailClient := &mockGmailClient{}
 
-	RunSingleSync(account, cfg, db, pop3Client, gmailClient)
+	RunSingleSync(context.Background(), account, cfg, db, pop3Client, gmailClient)
 
 	assert.Len(t, gmailClient.pushedEmails, 2)
 	assert.True(t, db.syncedUIDs["uid1"])
@@ -117,7 +118,7 @@ func TestRunSingleSync_ErrorPath(t *testing.T) {
 	}
 	gmailClient := &mockGmailClient{shouldError: true}
 
-	RunSingleSync(account, cfg, db, pop3Client, gmailClient)
+	RunSingleSync(context.Background(), account, cfg, db, pop3Client, gmailClient)
 
 	assert.Len(t, gmailClient.pushedEmails, 0)
 	assert.False(t, db.syncedUIDs["uid1"])

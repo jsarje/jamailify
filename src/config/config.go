@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 )
 
@@ -24,17 +25,17 @@ type Config struct {
 func LoadConfig(path string) (*Config, error) {
 	configFile, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
 	var config Config
 	err = json.Unmarshal(configFile, &config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
 	if err := config.validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate config: %w", err)
 	}
 
 	return &config, nil

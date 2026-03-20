@@ -54,7 +54,12 @@ func TestDuplicateMarkSynced(t *testing.T) {
 
 	// Try to mark the same UID again
 	err = db.MarkSynced("account1", "uid1")
-	assert.Error(t, err, "Should return an error for duplicate UID")
+	assert.NoError(t, err, "Duplicate insert should be idempotent")
+
+	// Ensure the UID is still marked as synced
+	synced, err := db.IsSynced("account1", "uid1")
+	assert.NoError(t, err)
+	assert.True(t, synced, "UID should remain marked as synced")
 }
 
 func TestCrossAccountIsolation(t *testing.T) {

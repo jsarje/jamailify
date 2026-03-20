@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net"
+	"os"
+	"os/signal"
 	"strconv"
 	"sync"
 	"time"
@@ -25,10 +28,10 @@ type Pop3Operations interface {
 }
 
 type GmailOperations interface {
-	PushEmail(rawEmail []byte) error
+	PushEmail(ctx context.Context, rawEmail []byte) error
 }
 
-func RunSingleSync(account config.Account, cfg *config.Config, db DBOperations, pop3Client Pop3Operations, gmailClient GmailOperations) {
+func RunSingleSync(ctx context.Context, account config.Account, cfg *config.Config, db DBOperations, pop3Client Pop3Operations, gmailClient GmailOperations) {
 	log.Printf("[%s] Starting sync cycle", account.Name)
 
 	// 2. Get all Messages
@@ -59,7 +62,7 @@ func RunSingleSync(account config.Account, cfg *config.Config, db DBOperations, 
 			continue
 		}
 
-		if err := gmailClient.PushEmail(rawEmail); err != nil {
+		if err := gmailClient.PushEmail(ctx, rawEmail); err != nil {
 			log.Printf("[%s] ERROR: Failed to push email with UID %s to Gmail: %v", account.Name, msg.UID, err)
 			continue
 		}
@@ -86,72 +89,71 @@ func main() {
 	}
 	defer db.Close()
 
+	// Create a cancellable root context and handle OS signals for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt)
+	go func() {
+		<-sigs
+		log.Printf("Received interrupt, shutting down")
+		cancel()
+	}()
+
 	var wg sync.WaitGroup
 	for _, acc := range cfg.Accounts {
 		wg.Add(1)
 		go func(account config.Account) {
 			defer wg.Done()
 			log.Printf("[%s] Starting worker", account.Name)
-			
-			// Run first sync immediately and then on a ticker
+
 			ticker := time.NewTicker(time.Duration(cfg.PollIntervalMinutes) * time.Minute)
 			defer ticker.Stop()
 
-			// Run the sync function immediately
-			host, portStr, err := net.SplitHostPort(account.Pop3Server)
-			if err != nil {
-				log.Printf("[%s] ERROR: Invalid POP3 server address: %v", account.Name, err)
-			} else {
-				port, err := strconv.Atoi(portStr)
-				if err != nil {
-					log.Printf("[%s] ERROR: Invalid POP3 port: %v", account.Name, err)
-				} else {
-					pop3Client, err := pop3.NewClient(host, port, account.Pop3User, account.Pop3Pass, true)
-					if err != nil {
-						log.Printf("[%s] ERROR: Failed to connect to POP3 server: %v", account.Name, err)
-					} else {
-						gmailClient, err := gmail.NewClient(cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
-						if err != nil {
-							log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
-						} else {
-							RunSingleSync(account, cfg, db, pop3Client, gmailClient)
-						}
-						pop3Client.Close()
-					}
-				}
-			}
-
-			for range ticker.C {
+			// helper to run one sync cycle, returns when ctx is done
+			runOnce := func() {
 				host, portStr, err := net.SplitHostPort(account.Pop3Server)
 				if err != nil {
 					log.Printf("[%s] ERROR: Invalid POP3 server address: %v", account.Name, err)
-					continue
+					return
 				}
 				port, err := strconv.Atoi(portStr)
 				if err != nil {
 					log.Printf("[%s] ERROR: Invalid POP3 port: %v", account.Name, err)
-					continue
+					return
 				}
 
 				pop3Client, err := pop3.NewClient(host, port, account.Pop3User, account.Pop3Pass, true)
 				if err != nil {
 					log.Printf("[%s] ERROR: Failed to connect to POP3 server: %v", account.Name, err)
-					continue
+					return
 				}
+				defer pop3Client.Close()
 
-				gmailClient, err := gmail.NewClient(cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
+				gmailClient, err := gmail.NewClient(ctx, cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
 				if err != nil {
 					log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
-					pop3Client.Close()
-					continue
+					return
 				}
 
-				RunSingleSync(account, cfg, db, pop3Client, gmailClient)
-				pop3Client.Close()
+				RunSingleSync(ctx, account, cfg, db, pop3Client, gmailClient)
+			}
+
+			// First immediate run
+			runOnce()
+
+			for {
+				select {
+				case <-ctx.Done():
+					log.Printf("[%s] Worker received shutdown", account.Name)
+					return
+				case <-ticker.C:
+					runOnce()
+				}
 			}
 		}(acc)
 	}
 
 	wg.Wait()
 }
-

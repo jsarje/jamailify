@@ -1,6 +1,7 @@
 package gmail
 
 import (
+	"context"
 	"encoding/base64"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestPushEmail(t *testing.T) {
 	mockInsertCall.On("Do").Return(&gmail.Message{}, nil)
 
 	// Call the method.
-	err := client.PushEmail(rawEmail)
+	err := client.PushEmail(context.Background(), rawEmail)
 
 	// Assert that the expectations were met.
 	assert.NoError(t, err)
