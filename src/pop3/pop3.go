@@ -46,8 +46,8 @@ func NewClient(server, user, pass string) (*Client, error) {
 	return &Client{conn: c}, nil
 }
 
-func (c *Client) Close() {
-	c.conn.Quit()
+func (c *Client) Close() error {
+	return c.conn.Quit()
 }
 
 func (c *Client) ListMessages() ([]MessageInfo, error) {

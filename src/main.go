@@ -11,48 +11,23 @@ import (
 	"jamailify/src/pop3"
 )
 
-func main() {
-	cfg, err := config.LoadConfig("config.json")
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-
-	db, err := database.NewDB("sync_state.db")
-	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	var wg sync.WaitGroup
-	for _, acc := range cfg.Accounts {
-		wg.Add(1)
-		go func(account config.Account) {
-			defer wg.Done()
-			log.Printf("[%s] Starting worker", account.Name)
-			// Run first sync immediately
-			syncAccount(account, cfg, db)
-			// Then run on a ticker
-			ticker := time.NewTicker(time.Duration(cfg.PollIntervalMinutes) * time.Minute)
-			defer ticker.Stop()
-			for range ticker.C {
-				syncAccount(account, cfg, db)
-			}
-		}(acc)
-	}
-
-	wg.Wait()
+type DBOperations interface {
+	IsSynced(accountName, uid string) (bool, error)
+	MarkSynced(accountName, uid string) error
 }
 
-func syncAccount(account config.Account, cfg *config.Config, db *database.DB) {
-	log.Printf("[%s] Starting sync cycle", account.Name)
+type Pop3Operations interface {
+	ListMessages() ([]pop3.MessageInfo, error)
+	GetMessage(seqNum int) ([]byte, error)
+	Close() error
+}
 
-	// 1. Connect to POP3
-	pop3Client, err := pop3.NewClient(account.Pop3Server, account.Pop3User, account.Pop3Pass)
-	if err != nil {
-		log.Printf("[%s] ERROR: Failed to connect to POP3 server: %v", account.Name, err)
-		return
-	}
-	defer pop3Client.Close()
+type GmailOperations interface {
+	PushEmail(rawEmail []byte) error
+}
+
+func RunSingleSync(account config.Account, cfg *config.Config, db DBOperations, pop3Client Pop3Operations, gmailClient GmailOperations) {
+	log.Printf("[%s] Starting sync cycle", account.Name)
 
 	// 2. Get all Messages
 	messages, err := pop3Client.ListMessages()
@@ -82,12 +57,6 @@ func syncAccount(account config.Account, cfg *config.Config, db *database.DB) {
 			continue
 		}
 
-		gmailClient, err := gmail.NewClient(cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
-		if err != nil {
-			log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
-			continue
-		}
-
 		if err := gmailClient.PushEmail(rawEmail); err != nil {
 			log.Printf("[%s] ERROR: Failed to push email with UID %s to Gmail: %v", account.Name, msg.UID, err)
 			continue
@@ -102,3 +71,64 @@ func syncAccount(account config.Account, cfg *config.Config, db *database.DB) {
 	}
 	log.Printf("[%s] Sync cycle finished", account.Name)
 }
+
+func main() {
+	cfg, err := config.LoadConfig("config.json")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	db, err := database.NewDB("sync_state.db")
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	var wg sync.WaitGroup
+	for _, acc := range cfg.Accounts {
+		wg.Add(1)
+		go func(account config.Account) {
+			defer wg.Done()
+			log.Printf("[%s] Starting worker", account.Name)
+			
+			// Run first sync immediately and then on a ticker
+			ticker := time.NewTicker(time.Duration(cfg.PollIntervalMinutes) * time.Minute)
+			defer ticker.Stop()
+
+			// Run the sync function immediately
+			pop3Client, err := pop3.NewClient(account.Pop3Server, account.Pop3User, account.Pop3Pass)
+			if err != nil {
+				log.Printf("[%s] ERROR: Failed to connect to POP3 server: %v", account.Name, err)
+			} else {
+				defer pop3Client.Close()
+
+				gmailClient, err := gmail.NewClient(cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
+				if err != nil {
+					log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
+				} else {
+					RunSingleSync(account, cfg, db, pop3Client, gmailClient)
+				}
+			}
+
+			for range ticker.C {
+				pop3Client, err := pop3.NewClient(account.Pop3Server, account.Pop3User, account.Pop3Pass)
+				if err != nil {
+					log.Printf("[%s] ERROR: Failed to connect to POP3 server: %v", account.Name, err)
+					continue
+				}
+				defer pop3Client.Close()
+
+				gmailClient, err := gmail.NewClient(cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
+				if err != nil {
+					log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
+					continue
+				}
+
+				RunSingleSync(account, cfg, db, pop3Client, gmailClient)
+			}
+		}(acc)
+	}
+
+	wg.Wait()
+}
+

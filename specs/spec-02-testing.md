@@ -40,13 +40,34 @@ Please generate the following `_test.go` files alongside their respective implem
     * Verify that a dummy raw RFC 2822 byte array is correctly encoded using `base64.URLEncoding` (without padding).
     * Verify the mock `Insert` method is called exactly once per `PushEmail` invocation.
 
-### 4. POP3 Fetcher Tests (`pop3_client/pop3_test.go`)
-* **Target:** UID fetching and email downloading logic.
-* **Strategy:** Abstract the `go-pop3` client behind an interface (e.g., `type POP3Connection interface { Uidl(...) , Retr(...) }`). 
-* **Test Cases:**
-    * Inject a mock connection that returns a predefined list of UIDs and verify the fetcher parses them correctly.
-    * Inject a mock connection that simulates a network error during `Uidl` and ensure the error bubbles up correctly.
-    * Verify `Retr` is called with the correct sequence number when downloading an email.
+## POP3 Integration Testing (`pop3_client/pop3_integration_test.go`)
+
+### Overview
+Skip unit testing with mocks for the POP3 client. Instead, implement an integration test using Docker to verify the POP3 fetching logic against a real, running mail server.
+
+### Tools & Libraries
+* **Container Management:** Use `github.com/testcontainers/testcontainers-go` to programmatically manage the Docker container lifecycle within the Go test.
+* **Test Mail Server Image:** Use the `greenmail/standalone:latest` Docker image. This is a lightweight, open-source test mail server that provides both POP3 and SMTP out of the box without complex configuration.
+
+### Integration Test Lifecycle & Setup
+1. **Setup:** * Use `testcontainers.GenericContainer` to spin up `greenmail/standalone`.
+   * Map the container's default POP3 port (3110) and SMTP port (3025) to random available ports on the host to avoid CI/CD port conflicts.
+   * Configure GreenMail with a test user via environment variables (e.g., `GREENMAIL_OPTS=-Dgreenmail.setup.test.all -Dgreenmail.users=testuser:testpass@example.com`).
+2. **Seed Data (SMTP):**
+   * Write a helper function in the test that connects to the mapped SMTP port using standard Go `net/smtp`.
+   * Send 2-3 raw RFC 2822 dummy emails to the `testuser@example.com` inbox.
+3. **Execution (POP3):**
+   * Instantiate the `pop3_client` using the mapped POP3 port and the test credentials.
+   * Call the function to fetch UIDs.
+   * Call the function to download the raw emails.
+4. **Assertions:**
+   * Assert that the correct number of UIDs were returned.
+   * Assert that the downloaded raw email bytes match the payloads that were injected via SMTP.
+5. **Teardown:**
+   * Use `defer container.Terminate(ctx)` to ensure the Docker container is destroyed immediately after the test finishes, even if it fails.
+
+### Refactoring Note for AI
+Ensure the `pop3_client` is built to accept dynamic hosts and ports rather than hardcoding port 995 or forcing TLS, so that it can connect to the unencrypted local GreenMail container during testing, but use TLS in production based on the `config.json`.
 
 ### 5. Core Sync Logic Tests (`main_test.go` or `sync_test.go`)
 * **Target:** The single iteration of the sync process (Step 4 of the main spec).
