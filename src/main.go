@@ -75,12 +75,12 @@ func RunSingleSync(account config.Account, cfg *config.Config, db DBOperations, 
 }
 
 func main() {
-	cfg, err := config.LoadConfig("config.json")
+	cfg, err := config.LoadConfig("/app/config/config.json")
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	db, err := database.NewDB("sync_state.db")
+	db, err := database.NewDB("/app/data/sync_state.db")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}

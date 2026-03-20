@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  jamailify:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
