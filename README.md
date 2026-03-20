@@ -54,6 +54,17 @@ The application reads configuration from `/app/config/config.json` (see `config/
 		}
 	]
 }
+
+Additional optional configuration keys:
+
+- `max_messages_to_check` (int): maximum number of newest messages to inspect per sync run. Defaults to `2000` when omitted or zero. This prevents scanning very large mailboxes on each poll.
+- `sync_window_days` (int): number of days to look back for messages to sync. Defaults to `7` when omitted or zero. Only messages with a `Date` header within this window are considered.
+
+Behavior notes:
+
+- The sync worker now inspects messages newest→oldest and stops scanning when it encounters a message older than the configured window. This reduces bandwidth and processing for large mailboxes.
+- To determine message age the service uses POP3 `TOP` to fetch headers only. If a server does not support `TOP`, the service falls back to `RETR` (full message) and parses the `Date` header.
+- UID tracking in SQLite (`sync_state.db`) remains the mechanism to avoid duplicate processing.
 ```
 
 Runtime file locations used by the service:

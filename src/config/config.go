@@ -20,6 +20,12 @@ type Config struct {
 	GoogleClientID      string    `json:"google_client_id"`
 	GoogleClientSecret  string    `json:"google_client_secret"`
 	Accounts            []Account `json:"accounts"`
+	// MaxMessagesToCheck limits how many newest messages will be inspected per run.
+	// If zero, a sensible default is used (2000).
+	MaxMessagesToCheck int `json:"max_messages_to_check"`
+	// SyncWindowDays controls how far back (in days) messages will be considered for sync.
+	// If zero, defaults to 7 days.
+	SyncWindowDays int `json:"sync_window_days"`
 }
 
 func LoadConfig(path string) (*Config, error) {

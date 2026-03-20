@@ -88,3 +88,59 @@ func (c *Client) GetMessage(seqNum int) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
+
+// Stat returns the number of messages in the mailbox.
+func (c *Client) Stat() (int, error) {
+	if c == nil || c.conn == nil {
+		return 0, fmt.Errorf("pop3: client is not connected")
+	}
+	count, _, err := c.conn.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("stat: %w", err)
+	}
+	return count, nil
+}
+
+// TopMessage fetches headers only for the given sequence number using POP3 TOP.
+func (c *Client) TopMessage(seqNum int) ([]byte, error) {
+	if c == nil || c.conn == nil {
+		return nil, fmt.Errorf("pop3: client is not connected")
+	}
+	msg, err := c.conn.Top(seqNum, 0)
+	if err != nil {
+		return nil, fmt.Errorf("top seq %d: %w", seqNum, err)
+	}
+	if msg == nil {
+		return nil, fmt.Errorf("pop3: top returned nil for seq %d", seqNum)
+	}
+	var buf bytes.Buffer
+	if err := msg.WriteTo(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// UIDLForSeq returns the UID for a single sequence number. Falls back to full UIDL map when needed.
+func (c *Client) UIDLForSeq(seqNum int) (string, error) {
+	if c == nil || c.conn == nil {
+		return "", fmt.Errorf("pop3: client is not connected")
+	}
+	msgs, err := c.conn.Uidl(seqNum)
+	if err != nil {
+		// fallback to full map
+		full, err2 := c.conn.Uidl(0)
+		if err2 != nil {
+			return "", fmt.Errorf("uidl seq %d: %v; fallback failed: %w", seqNum, err, err2)
+		}
+		for k, v := range full {
+			if k+1 == seqNum {
+				return v.UID, nil
+			}
+		}
+		return "", fmt.Errorf("uidl: seq %d not found", seqNum)
+	}
+	for _, v := range msgs {
+		return v.UID, nil
+	}
+	return "", fmt.Errorf("uidl: seq %d returned empty", seqNum)
+}

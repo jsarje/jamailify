@@ -61,9 +61,13 @@ Please divide the logic into logical Go files/packages or clean functions within
     1.  Run the sync process immediately.
     2.  Block on a `time.NewTicker` based on `poll_interval_minutes`.
 * The Sync Process steps:
-    1. Connect to POP3.
-    2. Get all UIDs.
-    3. For each UID, check `IsSynced` via the DB manager.
-    4. If not synced: Download raw email -> Push via Gmail API -> `MarkSynced` in DB.
-    5. Log successes and errors cleanly (include account name in logs).
+  1. Connect to POP3.
+  2. Inspect mailbox newest-first (use `STAT` to get message count and `TOP` to fetch headers) and consider only messages within the last 7 days.
+  3. For each UID in that window, check `IsSynced` via the DB manager.
+  4. If not synced and within the 7-day window: Download raw email -> Push via Gmail API -> `MarkSynced` in DB.
+  *
+  * Configuration:
+    - `max_messages_to_check` (int): Maximum number of newest messages to inspect per sync run. Defaults to `2000` when omitted or zero.
+    - `sync_window_days` (int): Number of days to look back for messages to sync. Defaults to `7` when omitted or zero.
+  5. Log successes and errors cleanly (include account name in logs).
 * Use a `select {}` or `sync.WaitGroup` at the end of `main()` to keep the daemon running forever.

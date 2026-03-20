@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"net"
+	"net/mail"
 	"os"
 	"os/signal"
 	"strconv"
@@ -22,7 +24,9 @@ type DBOperations interface {
 }
 
 type Pop3Operations interface {
-	ListMessages() ([]pop3.MessageInfo, error)
+	Stat() (int, error)
+	UIDLForSeq(seqNum int) (string, error)
+	TopMessage(seqNum int) ([]byte, error)
 	GetMessage(seqNum int) ([]byte, error)
 	Close() error
 }
@@ -33,46 +37,97 @@ type GmailOperations interface {
 
 func RunSingleSync(ctx context.Context, account config.Account, cfg *config.Config, db DBOperations, pop3Client Pop3Operations, gmailClient GmailOperations) {
 	log.Printf("[%s] Starting sync cycle", account.Name)
+	// We'll only sync messages from the last 7 days. Iterate newest->oldest
+	// determine effective cutoff and maxToCheck from config (defaults if zero)
+	windowDays := cfg.SyncWindowDays
+	if windowDays <= 0 {
+		windowDays = 7
+	}
+	cutoff := time.Now().Add(time.Duration(-windowDays) * 24 * time.Hour)
 
-	// 2. Get all Messages
-	messages, err := pop3Client.ListMessages()
+	maxToCheck := cfg.MaxMessagesToCheck
+	if maxToCheck <= 0 {
+		maxToCheck = 2000 // safety cap to avoid scanning huge mailboxes
+	}
+
+	count, err := pop3Client.Stat()
 	if err != nil {
-		log.Printf("[%s] ERROR: Failed to list messages: %v", account.Name, err)
+		log.Printf("[%s] ERROR: Failed to stat mailbox: %v", account.Name, err)
 		return
 	}
-	log.Printf("[%s] Found %d messages on server", account.Name, len(messages))
+	log.Printf("[%s] Mailbox has %d messages; checking up to %d newest", account.Name, count, maxToCheck)
 
-	// 3. For each message, check IsSynced
-	for _, msg := range messages {
-		isSynced, err := db.IsSynced(account.Name, msg.UID)
+	startSeq := 1
+	if count > maxToCheck {
+		startSeq = count - maxToCheck + 1
+	}
+
+	for seq := count; seq >= startSeq; seq-- {
+		uid, err := pop3Client.UIDLForSeq(seq)
 		if err != nil {
-			log.Printf("[%s] ERROR: Failed to check sync status for UID %s: %v", account.Name, msg.UID, err)
+			log.Printf("[%s] WARN: unable to get UID for seq %d: %v", account.Name, seq, err)
 			continue
 		}
 
+		isSynced, err := db.IsSynced(account.Name, uid)
+		if err != nil {
+			log.Printf("[%s] ERROR: Failed to check sync status for UID %s: %v", account.Name, uid, err)
+			continue
+		}
 		if isSynced {
-			continue // Don't log for every synced message to avoid noise
+			continue
 		}
 
-		// 4. If not synced: Download raw email -> Push via Gmail API -> MarkSynced in DB
-		log.Printf("[%s] Found new email with UID: %s", account.Name, msg.UID)
-		rawEmail, err := pop3Client.GetMessage(msg.SeqNum)
+		// Fetch headers only. If TOP is unsupported by the server, fall back to RETR and parse headers.
+		hdrs, err := pop3Client.TopMessage(seq)
 		if err != nil {
-			log.Printf("[%s] ERROR: Failed to download email with UID %s: %v", account.Name, msg.UID, err)
+			log.Printf("[%s] WARN: TOP failed for seq %d (UID %s): %v — falling back to RETR", account.Name, seq, uid, err)
+			raw, err2 := pop3Client.GetMessage(seq)
+			if err2 != nil {
+				log.Printf("[%s] WARN: RETR fallback failed for seq %d (UID %s): %v", account.Name, seq, uid, err2)
+				continue
+			}
+			hdrs = raw
+		}
+		mr, err := mail.ReadMessage(bytes.NewReader(hdrs))
+		if err != nil {
+			log.Printf("[%s] WARN: failed to read headers for seq %d: %v", account.Name, seq, err)
+			continue
+		}
+		dateStr := mr.Header.Get("Date")
+		if dateStr == "" {
+			log.Printf("[%s] WARN: no Date header for seq %d (UID %s), skipping", account.Name, seq, uid)
+			continue
+		}
+		t, err := mail.ParseDate(dateStr)
+		if err != nil {
+			log.Printf("[%s] WARN: cannot parse Date header %q for seq %d: %v", account.Name, dateStr, seq, err)
+			continue
+		}
+		if t.Before(cutoff) {
+			// since we're iterating newest->oldest, safe to stop
+			break
+		}
+
+		// 4. If not synced and within cutoff: Download raw email -> Push via Gmail API -> MarkSynced in DB
+		log.Printf("[%s] Found new email with UID: %s", account.Name, uid)
+		rawEmail, err := pop3Client.GetMessage(seq)
+		if err != nil {
+			log.Printf("[%s] ERROR: Failed to download email seq %d UID %s: %v", account.Name, seq, uid, err)
 			continue
 		}
 
 		if err := gmailClient.PushEmail(ctx, rawEmail); err != nil {
-			log.Printf("[%s] ERROR: Failed to push email with UID %s to Gmail: %v", account.Name, msg.UID, err)
+			log.Printf("[%s] ERROR: Failed to push email with UID %s to Gmail: %v", account.Name, uid, err)
 			continue
 		}
 
-		if err := db.MarkSynced(account.Name, msg.UID); err != nil {
-			log.Printf("[%s] ERROR: Failed to mark email with UID %s as synced: %v", account.Name, msg.UID, err)
+		if err := db.MarkSynced(account.Name, uid); err != nil {
+			log.Printf("[%s] ERROR: Failed to mark email with UID %s as synced: %v", account.Name, uid, err)
 			continue
 		}
 
-		log.Printf("[%s] Successfully synced and pushed email with UID: %s", account.Name, msg.UID)
+		log.Printf("[%s] Successfully synced and pushed email with UID: %s", account.Name, uid)
 	}
 	log.Printf("[%s] Sync cycle finished", account.Name)
 }
