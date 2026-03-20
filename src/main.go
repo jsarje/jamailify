@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -96,35 +98,56 @@ func main() {
 			defer ticker.Stop()
 
 			// Run the sync function immediately
-			pop3Client, err := pop3.NewClient(account.Pop3Server, account.Pop3User, account.Pop3Pass)
+			host, portStr, err := net.SplitHostPort(account.Pop3Server)
 			if err != nil {
-				log.Printf("[%s] ERROR: Failed to connect to POP3 server: %v", account.Name, err)
+				log.Printf("[%s] ERROR: Invalid POP3 server address: %v", account.Name, err)
 			} else {
-				defer pop3Client.Close()
-
-				gmailClient, err := gmail.NewClient(cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
+				port, err := strconv.Atoi(portStr)
 				if err != nil {
-					log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
+					log.Printf("[%s] ERROR: Invalid POP3 port: %v", account.Name, err)
 				} else {
-					RunSingleSync(account, cfg, db, pop3Client, gmailClient)
+					pop3Client, err := pop3.NewClient(host, port, account.Pop3User, account.Pop3Pass, true)
+					if err != nil {
+						log.Printf("[%s] ERROR: Failed to connect to POP3 server: %v", account.Name, err)
+					} else {
+						gmailClient, err := gmail.NewClient(cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
+						if err != nil {
+							log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
+						} else {
+							RunSingleSync(account, cfg, db, pop3Client, gmailClient)
+						}
+						pop3Client.Close()
+					}
 				}
 			}
 
 			for range ticker.C {
-				pop3Client, err := pop3.NewClient(account.Pop3Server, account.Pop3User, account.Pop3Pass)
+				host, portStr, err := net.SplitHostPort(account.Pop3Server)
+				if err != nil {
+					log.Printf("[%s] ERROR: Invalid POP3 server address: %v", account.Name, err)
+					continue
+				}
+				port, err := strconv.Atoi(portStr)
+				if err != nil {
+					log.Printf("[%s] ERROR: Invalid POP3 port: %v", account.Name, err)
+					continue
+				}
+
+				pop3Client, err := pop3.NewClient(host, port, account.Pop3User, account.Pop3Pass, true)
 				if err != nil {
 					log.Printf("[%s] ERROR: Failed to connect to POP3 server: %v", account.Name, err)
 					continue
 				}
-				defer pop3Client.Close()
 
 				gmailClient, err := gmail.NewClient(cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
 				if err != nil {
 					log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
+					pop3Client.Close()
 					continue
 				}
 
 				RunSingleSync(account, cfg, db, pop3Client, gmailClient)
+				pop3Client.Close()
 			}
 		}(acc)
 	}

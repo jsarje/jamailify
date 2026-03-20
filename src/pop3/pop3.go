@@ -2,8 +2,6 @@ package pop3
 
 import (
 	"bytes"
-	"net"
-	"strconv"
 
 	"github.com/knadh/go-pop3"
 )
@@ -17,20 +15,11 @@ type MessageInfo struct {
 	UID    string
 }
 
-func NewClient(server, user, pass string) (*Client, error) {
-	host, portStr, err := net.SplitHostPort(server)
-	if err != nil {
-		return nil, err
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return nil, err
-	}
-
+func NewClient(host string, port int, user, pass string, useTLS bool) (*Client, error) {
 	p := pop3.New(pop3.Opt{
 		Host:       host,
 		Port:       port,
-		TLSEnabled: true,
+		TLSEnabled: useTLS,
 	})
 
 	c, err := p.NewConn()
@@ -57,7 +46,8 @@ func (c *Client) ListMessages() ([]MessageInfo, error) {
 		return nil, err
 	}
 	for k, v := range msgs {
-		messages = append(messages, MessageInfo{SeqNum: k, UID: v.UID})
+		// go-pop3 returns 0-based indexes for UIDL; POP3 RETR expects 1-based sequence numbers
+		messages = append(messages, MessageInfo{SeqNum: k + 1, UID: v.UID})
 	}
 	return messages, nil
 }
