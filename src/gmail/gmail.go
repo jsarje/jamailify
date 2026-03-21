@@ -13,32 +13,32 @@ import (
 	"google.golang.org/api/option"
 )
 
-type InsertCall interface {
+type ImportCall interface {
 	Do(opts ...googleapi.CallOption) (*gmail.Message, error)
 }
 
-type MessageInserter interface {
-	Insert(userId string, message *gmail.Message) InsertCall
+type MessageImporter interface {
+	Import(userId string, message *gmail.Message) ImportCall
 }
 
 type gmailAPIAdapter struct {
 	service *gmail.Service
 }
 
-func (g *gmailAPIAdapter) Insert(userId string, message *gmail.Message) InsertCall {
-	return &insertCallAdapter{call: g.service.Users.Messages.Insert(userId, message)}
+func (g *gmailAPIAdapter) Import(userId string, message *gmail.Message) ImportCall {
+	return &importCallAdapter{call: g.service.Users.Messages.Import(userId, message)}
 }
 
-type insertCallAdapter struct {
-	call *gmail.UsersMessagesInsertCall
+type importCallAdapter struct {
+	call *gmail.UsersMessagesImportCall
 }
 
-func (i *insertCallAdapter) Do(opts ...googleapi.CallOption) (*gmail.Message, error) {
+func (i *importCallAdapter) Do(opts ...googleapi.CallOption) (*gmail.Message, error) {
 	return i.call.Do(opts...)
 }
 
 type Client struct {
-	inserter MessageInserter
+	importer MessageImporter
 }
 
 // NewClient creates a Gmail client using the provided OAuth2 credentials.
@@ -60,7 +60,7 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string)
 		return nil, fmt.Errorf("create gmail service: %w", err)
 	}
 
-	return &Client{inserter: &gmailAPIAdapter{service: srv}}, nil
+	return &Client{importer: &gmailAPIAdapter{service: srv}}, nil
 }
 
 // PushEmail pushes a raw RFC2822 email to the authenticated user's mailbox.
@@ -72,7 +72,7 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string)
 func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) error {
 	_ = ctx // currently unused but kept for API symmetry
 	message := &gmail.Message{Raw: base64.RawURLEncoding.EncodeToString(rawRFC2822)}
-	_, err := c.inserter.Insert("me", message).Do()
+	_, err := c.importer.Import("me", message).Do()
 	if err != nil {
 		return fmt.Errorf("push email: %w", err)
 	}
