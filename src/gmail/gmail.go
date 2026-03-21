@@ -1,9 +1,12 @@
 package gmail
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/mail"
+	"strings"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -29,6 +32,10 @@ func (g *gmailAPIAdapter) Import(userId string, message *gmail.Message) ImportCa
 	return &importCallAdapter{call: g.service.Users.Messages.Import(userId, message)}
 }
 
+func (g *gmailAPIAdapter) List(userId string) ListCall {
+	return &listCallAdapter{call: g.service.Users.Messages.List(userId)}
+}
+
 type importCallAdapter struct {
 	call *gmail.UsersMessagesImportCall
 }
@@ -37,8 +44,36 @@ func (i *importCallAdapter) Do(opts ...googleapi.CallOption) (*gmail.Message, er
 	return i.call.Do(opts...)
 }
 
+// ListCall abstracts Users.Messages.List so we can set query params and Do.
+type ListCall interface {
+	Q(q string) ListCall
+	MaxResults(max int64) ListCall
+	Do(opts ...googleapi.CallOption) (*gmail.ListMessagesResponse, error)
+}
+
+type MessageLister interface {
+	List(userId string) ListCall
+}
+
+type listCallAdapter struct {
+	call *gmail.UsersMessagesListCall
+}
+
+func (l *listCallAdapter) Q(q string) ListCall {
+	return &listCallAdapter{call: l.call.Q(q)}
+}
+
+func (l *listCallAdapter) MaxResults(max int64) ListCall {
+	return &listCallAdapter{call: l.call.MaxResults(max)}
+}
+
+func (l *listCallAdapter) Do(opts ...googleapi.CallOption) (*gmail.ListMessagesResponse, error) {
+	return l.call.Do(opts...)
+}
+
 type Client struct {
 	importer MessageImporter
+	lister   MessageLister
 }
 
 // NewClient creates a Gmail client using the provided OAuth2 credentials.
@@ -48,7 +83,7 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string)
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		Endpoint:     google.Endpoint,
-		Scopes:       []string{gmail.GmailInsertScope},
+		Scopes:       []string{gmail.GmailInsertScope, gmail.GmailReadonlyScope},
 	}
 
 	token := &oauth2.Token{RefreshToken: refreshToken}
@@ -60,7 +95,8 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string)
 		return nil, fmt.Errorf("create gmail service: %w", err)
 	}
 
-	return &Client{importer: &gmailAPIAdapter{service: srv}}, nil
+	adapter := &gmailAPIAdapter{service: srv}
+	return &Client{importer: adapter, lister: adapter}, nil
 }
 
 // PushEmail pushes a raw RFC2822 email to the authenticated user's mailbox.
@@ -71,6 +107,26 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string)
 // context-aware changes.
 func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) error {
 	_ = ctx // currently unused but kept for API symmetry
+
+	// If we can, extract Message-ID header and search for existing message
+	// to avoid duplicate imports.
+	if c.lister != nil {
+		if mr, err := mail.ReadMessage(bytes.NewReader(rawRFC2822)); err == nil {
+			mid := mr.Header.Get("Message-ID")
+			if mid == "" {
+				mid = mr.Header.Get("Message-Id")
+			}
+			mid = strings.TrimSpace(mid)
+			if mid != "" {
+				q := "rfc822msgid:" + mid
+				if res, err := c.lister.List("me").Q(q).MaxResults(1).Do(); err == nil && res != nil && len(res.Messages) > 0 {
+					// already exists
+					return nil
+				}
+			}
+		}
+	}
+
 	message := &gmail.Message{Raw: base64.RawURLEncoding.EncodeToString(rawRFC2822)}
 	_, err := c.importer.Import("me", message).Do()
 	if err != nil {

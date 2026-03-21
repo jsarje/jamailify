@@ -34,16 +34,58 @@ func (m *MockMessageImporter) Import(userId string, message *gmail.Message) Impo
 	return args.Get(0).(ImportCall)
 }
 
+// MockListCall is a mock for the ListCall interface
+type MockListCall struct {
+	mock.Mock
+}
+
+func (m *MockListCall) Q(q string) ListCall {
+	m.Called(q)
+	return m
+}
+
+func (m *MockListCall) MaxResults(max int64) ListCall {
+	m.Called(max)
+	return m
+}
+
+func (m *MockListCall) Do(opts ...googleapi.CallOption) (*gmail.ListMessagesResponse, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*gmail.ListMessagesResponse), args.Error(1)
+}
+
+// MockMessageLister is a mock for the MessageLister interface
+type MockMessageLister struct {
+	mock.Mock
+}
+
+func (m *MockMessageLister) List(userId string) ListCall {
+	args := m.Called(userId)
+	return args.Get(0).(ListCall)
+}
+
 func TestPushEmail(t *testing.T) {
 	mockImporter := new(MockMessageImporter)
 	mockImportCall := new(MockImportCall)
+	// Also mock the lister so PushEmail's pre-import dedupe path is exercised.
+	mockLister := new(MockMessageLister)
+	mockListCall := new(MockListCall)
 
-	client := &Client{importer: mockImporter}
+	client := &Client{importer: mockImporter, lister: mockLister}
 
-	rawEmail := []byte("From: from@example.com\nTo: to@example.com\nSubject: Test\n\nTest Body")
+	rawEmail := []byte("Message-ID: <abc@example.com>\nFrom: from@example.com\nTo: to@example.com\nSubject: Test\n\nTest Body")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
-	// Set up the expectation.
+	// Set up the lister expectations: search returns no existing messages.
+	mockLister.On("List", "me").Return(mockListCall)
+	mockListCall.On("Q", mock.Anything).Return(mockListCall)
+	mockListCall.On("MaxResults", int64(1)).Return(mockListCall)
+	mockListCall.On("Do").Return(&gmail.ListMessagesResponse{Messages: nil}, nil)
+
+	// Set up the importer expectation: will be called after search returns no match.
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
 		return msg.Raw == expectedEncodedEmail
 	})).Return(mockImportCall)
