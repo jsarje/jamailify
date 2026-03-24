@@ -9,9 +9,10 @@ import (
 
 type Account struct {
 	Name              string `json:"name"`
-	Pop3Server        string `json:"pop3_server"`
-	Pop3User          string `json:"pop3_user"`
-	Pop3Pass          string `json:"pop3_pass"`
+	Protocol          string `json:"protocol"`
+	Server            string `json:"server"`
+	User              string `json:"user"`
+	Pass              string `json:"pass"`
 	GmailRefreshToken string `json:"gmail_refresh_token"`
 }
 
@@ -60,21 +61,27 @@ func (c *Config) validate() error {
 	if len(c.Accounts) == 0 {
 		return errors.New("at least one account is required")
 	}
-	for _, account := range c.Accounts {
+	for i, account := range c.Accounts {
 		if account.Name == "" {
-			return errors.New("account name is required")
+			return fmt.Errorf("account %d: name is required", i)
 		}
-		if account.Pop3Server == "" {
-			return errors.New("pop3_server is required")
+		if account.Protocol == "" {
+			return fmt.Errorf("account %q: protocol is required", account.Name)
 		}
-		if account.Pop3User == "" {
-			return errors.New("pop3_user is required")
+		if account.Protocol != "pop3" && account.Protocol != "imap" {
+			return fmt.Errorf("account %q: protocol must be 'pop3' or 'imap'", account.Name)
 		}
-		if account.Pop3Pass == "" {
-			return errors.New("pop3_pass is required")
+		if account.Server == "" {
+			return fmt.Errorf("account %q: server is required", account.Name)
+		}
+		if account.User == "" {
+			return fmt.Errorf("account %q: user is required", account.Name)
+		}
+		if account.Pass == "" {
+			return fmt.Errorf("account %q: pass is required", account.Name)
 		}
 		if account.GmailRefreshToken == "" {
-			return errors.New("gmail_refresh_token is required")
+			return fmt.Errorf("account %q: gmail_refresh_token is required", account.Name)
 		}
 	}
 	return nil

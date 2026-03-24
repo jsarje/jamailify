@@ -3,78 +3,102 @@ package pop3
 import (
 	"bytes"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/knadh/go-pop3"
+	"jamailify/src/config"
+	"jamailify/src/fetcher"
 )
 
-type Client struct {
-	conn *pop3.Conn
+// POP3Client implements the EmailFetcher interface for POP3 servers.
+type POP3Client struct {
+	cfg    *config.Account
+	client *pop3.Conn
 }
 
-type MessageInfo struct {
-	SeqNum int
-	UID    string
+// NewPOP3Client creates a new POP3 client.
+func NewPOP3Client(cfg *config.Account) (fetcher.EmailFetcher, error) {
+	return &POP3Client{cfg: cfg}, nil
 }
 
-func NewClient(host string, port int, user, pass string, useTLS bool) (*Client, error) {
+func (c *POP3Client) Connect() error {
+	host, portStr, _ := strings.Cut(c.cfg.Server, ":")
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("invalid port in server address: %s", c.cfg.Server)
+	}
+
 	p := pop3.New(pop3.Opt{
 		Host:       host,
 		Port:       port,
-		TLSEnabled: useTLS,
+		TLSEnabled: true,
 	})
 
-	c, err := p.NewConn()
+	conn, err := p.NewConn()
 	if err != nil {
-		return nil, fmt.Errorf("connect to %s:%d: %w", host, port, err)
+		return fmt.Errorf("connect to %s:%d: %w", host, port, err)
 	}
 
-	if c == nil {
-		return nil, fmt.Errorf("pop3: connection returned nil")
+	if conn == nil {
+		return fmt.Errorf("pop3: connection returned nil")
 	}
 
-	if err := c.Auth(user, pass); err != nil {
-		if qerr := c.Quit(); qerr != nil {
-			return nil, fmt.Errorf("auth for user %s: %v; quit error: %w", user, err, qerr)
+	if err := conn.Auth(c.cfg.User, c.cfg.Pass); err != nil {
+		if qerr := conn.Quit(); qerr != nil {
+			return fmt.Errorf("auth for user %s: %v; quit error: %w", c.cfg.User, err, qerr)
 		}
-		return nil, fmt.Errorf("auth for user %s: %w", user, err)
+		return fmt.Errorf("auth for user %s: %w", c.cfg.User, err)
 	}
 
-	return &Client{conn: c}, nil
+	c.client = conn
+	return nil
 }
 
-func (c *Client) Close() error {
-	if c == nil || c.conn == nil {
-		return nil
+func (c *POP3Client) Close() error {
+	if c.client != nil {
+		return c.client.Quit()
 	}
-	return c.conn.Quit()
+	return nil
 }
 
-func (c *Client) ListMessages() ([]MessageInfo, error) {
-	if c == nil || c.conn == nil {
-		return nil, fmt.Errorf("pop3: client is not connected")
-	}
-
-	var messages []MessageInfo
-	msgs, err := c.conn.Uidl(0)
+func (c *POP3Client) GetUIDs() ([]string, error) {
+	msgs, err := c.client.Uidl(0)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
-	if len(msgs) == 0 {
-		return messages, nil
+	var uids []string
+	for _, m := range msgs {
+		uids = append(uids, m.UID)
 	}
-	for k, v := range msgs {
-		// go-pop3 returns 0-based indexes for UIDL; POP3 RETR expects 1-based sequence numbers
-		messages = append(messages, MessageInfo{SeqNum: k + 1, UID: v.UID})
-	}
-	return messages, nil
+	return uids, nil
 }
 
-func (c *Client) GetMessage(seqNum int) ([]byte, error) {
-	if c == nil || c.conn == nil {
-		return nil, fmt.Errorf("pop3: client is not connected")
+func (c *POP3Client) DownloadEmailHeaders(uid string) ([]byte, error) {
+	seqNum, err := c.getSeqNumFromUID(uid)
+	if err != nil {
+		return nil, err
 	}
+	msg, err := c.client.Top(seqNum, 0)
+	if err != nil {
+		return nil, fmt.Errorf("top seq %d: %w", seqNum, err)
+	}
+	if msg == nil {
+		return nil, fmt.Errorf("pop3: top returned nil for seq %d", seqNum)
+	}
+	var buf bytes.Buffer
+	if err := msg.WriteTo(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
 
-	msg, err := c.conn.Retr(seqNum)
+func (c *POP3Client) DownloadEmail(uid string) ([]byte, error) {
+	seqNum, err := c.getSeqNumFromUID(uid)
+	if err != nil {
+		return nil, err
+	}
+	msg, err := c.client.Retr(seqNum)
 	if err != nil {
 		return nil, fmt.Errorf("retr seq %d: %w", seqNum, err)
 	}
@@ -89,58 +113,15 @@ func (c *Client) GetMessage(seqNum int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Stat returns the number of messages in the mailbox.
-func (c *Client) Stat() (int, error) {
-	if c == nil || c.conn == nil {
-		return 0, fmt.Errorf("pop3: client is not connected")
-	}
-	count, _, err := c.conn.Stat()
+func (c *POP3Client) getSeqNumFromUID(uid string) (int, error) {
+	msgs, err := c.client.Uidl(0)
 	if err != nil {
-		return 0, fmt.Errorf("stat: %w", err)
+		return 0, fmt.Errorf("uidl: %w", err)
 	}
-	return count, nil
-}
-
-// TopMessage fetches headers only for the given sequence number using POP3 TOP.
-func (c *Client) TopMessage(seqNum int) ([]byte, error) {
-	if c == nil || c.conn == nil {
-		return nil, fmt.Errorf("pop3: client is not connected")
-	}
-	msg, err := c.conn.Top(seqNum, 0)
-	if err != nil {
-		return nil, fmt.Errorf("top seq %d: %w", seqNum, err)
-	}
-	if msg == nil {
-		return nil, fmt.Errorf("pop3: top returned nil for seq %d", seqNum)
-	}
-	var buf bytes.Buffer
-	if err := msg.WriteTo(&buf); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// UIDLForSeq returns the UID for a single sequence number. Falls back to full UIDL map when needed.
-func (c *Client) UIDLForSeq(seqNum int) (string, error) {
-	if c == nil || c.conn == nil {
-		return "", fmt.Errorf("pop3: client is not connected")
-	}
-	msgs, err := c.conn.Uidl(seqNum)
-	if err != nil {
-		// fallback to full map
-		full, err2 := c.conn.Uidl(0)
-		if err2 != nil {
-			return "", fmt.Errorf("uidl seq %d: %v; fallback failed: %w", seqNum, err, err2)
+	for i, m := range msgs {
+		if m.UID == uid {
+			return i + 1, nil
 		}
-		for k, v := range full {
-			if k+1 == seqNum {
-				return v.UID, nil
-			}
-		}
-		return "", fmt.Errorf("uidl: seq %d not found", seqNum)
 	}
-	for _, v := range msgs {
-		return v.UID, nil
-	}
-	return "", fmt.Errorf("uidl: seq %d returned empty", seqNum)
+	return 0, fmt.Errorf("uid %s not found", uid)
 }

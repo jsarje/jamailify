@@ -1,12 +1,9 @@
 package gmail
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
-	"net/mail"
-	"strings"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -108,29 +105,23 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string)
 func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) error {
 	_ = ctx // currently unused but kept for API symmetry
 
-	// If we can, extract Message-ID header and search for existing message
-	// to avoid duplicate imports.
-	if c.lister != nil {
-		if mr, err := mail.ReadMessage(bytes.NewReader(rawRFC2822)); err == nil {
-			mid := mr.Header.Get("Message-ID")
-			if mid == "" {
-				mid = mr.Header.Get("Message-Id")
-			}
-			mid = strings.TrimSpace(mid)
-			if mid != "" {
-				q := "rfc822msgid:" + mid
-				if res, err := c.lister.List("me").Q(q).MaxResults(1).Do(); err == nil && res != nil && len(res.Messages) > 0 {
-					// already exists
-					return nil
-				}
-			}
-		}
-	}
-
 	message := &gmail.Message{Raw: base64.RawURLEncoding.EncodeToString(rawRFC2822)}
 	_, err := c.importer.Import("me", message).Do()
 	if err != nil {
 		return fmt.Errorf("push email: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) MessageIdExists(ctx context.Context, messageId string) (bool, error) {
+	_ = ctx // currently unused but kept for API symmetry
+	if c.lister == nil {
+		return false, nil
+	}
+	q := fmt.Sprintf("rfc822msgid:%s", messageId)
+	res, err := c.lister.List("me").Q(q).MaxResults(1).Do()
+	if err != nil {
+		return false, fmt.Errorf("check messageIdExists: %w", err)
+	}
+	return len(res.Messages) > 0, nil
 }

@@ -20,8 +20,8 @@ func NewDB(path string) (*DB, error) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS synced_emails (
 			account_name TEXT,
-			pop3_uid TEXT,
-			PRIMARY KEY (account_name, pop3_uid)
+			message_uid TEXT,
+			PRIMARY KEY (account_name, message_uid)
 		);
 	`)
 	if err != nil {
@@ -33,7 +33,7 @@ func NewDB(path string) (*DB, error) {
 
 func (db *DB) IsSynced(accountName, uid string) (bool, error) {
 	var n int
-	err := db.QueryRow("SELECT 1 FROM synced_emails WHERE account_name = ? AND pop3_uid = ?", accountName, uid).Scan(&n)
+	err := db.QueryRow("SELECT 1 FROM synced_emails WHERE account_name = ? AND message_uid = ?", accountName, uid).Scan(&n)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -44,7 +44,7 @@ func (db *DB) IsSynced(accountName, uid string) (bool, error) {
 }
 
 func (db *DB) MarkSynced(accountName, uid string) error {
-	_, err := db.Exec("INSERT OR IGNORE INTO synced_emails (account_name, pop3_uid) VALUES (?, ?)", accountName, uid)
+	_, err := db.Exec("INSERT OR IGNORE INTO synced_emails (account_name, message_uid) VALUES (?, ?)", accountName, uid)
 	if err != nil {
 		return fmt.Errorf("mark synced: %w", err)
 	}

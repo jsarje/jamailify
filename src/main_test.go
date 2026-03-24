@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"jamailify/src/config"
-	"jamailify/src/pop3"
 	"testing"
 	"time"
 
@@ -25,57 +24,49 @@ func (m *mockDB) MarkSynced(accountName, uid string) error {
 	return nil
 }
 
-// Mock Pop3Operations
-type mockPop3Client struct {
-	messages   []pop3.MessageInfo
-	rawData    map[int][]byte
-	topErrors  map[int]error
-	topHeaders map[int]string
+// Mock EmailFetcher
+type mockEmailFetcher struct {
+	uids         []string
+	headers      map[string][]byte
+	emails       map[string][]byte
+	connectErr   error
+	uidsErr      error
+	headersErr   error
+	emailErr     error
+	closeErr     error
+	calledClose  bool
+	calledConnect bool
 }
 
-func (m *mockPop3Client) Stat() (int, error) {
-	return len(m.messages), nil
+func (m *mockEmailFetcher) Connect() error {
+	m.calledConnect = true
+	return m.connectErr
 }
-
-func (m *mockPop3Client) UIDLForSeq(seqNum int) (string, error) {
-	for _, mi := range m.messages {
-		if mi.SeqNum == seqNum {
-			return mi.UID, nil
-		}
+func (m *mockEmailFetcher) GetUIDs() ([]string, error) {
+	return m.uids, m.uidsErr
+}
+func (m *mockEmailFetcher) DownloadEmailHeaders(uid string) ([]byte, error) {
+	if m.headersErr != nil {
+		return nil, m.headersErr
 	}
-	return "", errors.New("not found")
+	return m.headers[uid], nil
 }
-
-func (m *mockPop3Client) TopMessage(seqNum int) ([]byte, error) {
-	if m.topErrors != nil {
-		if err, ok := m.topErrors[seqNum]; ok {
-			return nil, err
-		}
+func (m *mockEmailFetcher) DownloadEmail(uid string) ([]byte, error) {
+	if m.emailErr != nil {
+		return nil, m.emailErr
 	}
-	if m.topHeaders != nil {
-		if h, ok := m.topHeaders[seqNum]; ok {
-			return []byte(h), nil
-		}
-	}
-	// default: return minimal headers with Date: now
-	now := time.Now().Format(time.RFC1123Z)
-	hdr := "Date: " + now + "\r\nSubject: test\r\n\r\n"
-	return []byte(hdr), nil
+	return m.emails[uid], nil
 }
-
-func (m *mockPop3Client) GetMessage(seqNum int) ([]byte, error) {
-	if b, ok := m.rawData[seqNum]; ok {
-		return b, nil
-	}
-	return nil, errors.New("not found")
+func (m *mockEmailFetcher) Close() error {
+	m.calledClose = true
+	return m.closeErr
 }
-
-func (m *mockPop3Client) Close() error { return nil }
 
 // Mock GmailOperations
 type mockGmailClient struct {
-	pushedEmails [][]byte
-	shouldError  bool
+	pushedEmails       [][]byte
+	existingMessageIDs map[string]bool
+	shouldError        bool
 }
 
 func (m *mockGmailClient) PushEmail(ctx context.Context, rawEmail []byte) error {
@@ -86,23 +77,28 @@ func (m *mockGmailClient) PushEmail(ctx context.Context, rawEmail []byte) error 
 	return nil
 }
 
+func (m *mockGmailClient) MessageIdExists(ctx context.Context, messageId string) (bool, error) {
+	return m.existingMessageIDs[messageId], nil
+}
+
 func TestRunSingleSync_HappyPath(t *testing.T) {
 	account := config.Account{Name: "test-account"}
 	cfg := &config.Config{}
 	db := &mockDB{syncedUIDs: make(map[string]bool)}
-	pop3Client := &mockPop3Client{
-		messages: []pop3.MessageInfo{
-			{SeqNum: 1, UID: "uid1"},
-			{SeqNum: 2, UID: "uid2"},
+	emailFetcher := &mockEmailFetcher{
+		uids: []string{"uid1", "uid2"},
+		headers: map[string][]byte{
+			"uid1": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n"),
+			"uid2": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n"),
 		},
-		rawData: map[int][]byte{
-			1: []byte("email1"),
-			2: []byte("email2"),
+		emails: map[string][]byte{
+			"uid1": []byte("email1"),
+			"uid2": []byte("email2"),
 		},
 	}
 	gmailClient := &mockGmailClient{}
 
-	RunSingleSync(context.Background(), account, cfg, db, pop3Client, gmailClient)
+	RunSingleSync(context.Background(), account, cfg, db, emailFetcher, gmailClient)
 
 	assert.Len(t, gmailClient.pushedEmails, 2)
 	assert.True(t, db.syncedUIDs["uid1"])
@@ -113,20 +109,20 @@ func TestRunSingleSync_PartialSync(t *testing.T) {
 	account := config.Account{Name: "test-account"}
 	cfg := &config.Config{}
 	db := &mockDB{syncedUIDs: map[string]bool{"uid1": true}}
-	pop3Client := &mockPop3Client{
-		messages: []pop3.MessageInfo{
-			{SeqNum: 1, UID: "uid1"},
-			{SeqNum: 2, UID: "uid2"},
-			{SeqNum: 3, UID: "uid3"},
+	emailFetcher := &mockEmailFetcher{
+		uids: []string{"uid1", "uid2", "uid3"},
+		headers: map[string][]byte{
+			"uid2": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n"),
+			"uid3": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n"),
 		},
-		rawData: map[int][]byte{
-			2: []byte("email2"),
-			3: []byte("email3"),
+		emails: map[string][]byte{
+			"uid2": []byte("email2"),
+			"uid3": []byte("email3"),
 		},
 	}
 	gmailClient := &mockGmailClient{}
 
-	RunSingleSync(context.Background(), account, cfg, db, pop3Client, gmailClient)
+	RunSingleSync(context.Background(), account, cfg, db, emailFetcher, gmailClient)
 
 	assert.Len(t, gmailClient.pushedEmails, 2)
 	assert.True(t, db.syncedUIDs["uid1"])
@@ -138,17 +134,18 @@ func TestRunSingleSync_ErrorPath(t *testing.T) {
 	account := config.Account{Name: "test-account"}
 	cfg := &config.Config{}
 	db := &mockDB{syncedUIDs: make(map[string]bool)}
-	pop3Client := &mockPop3Client{
-		messages: []pop3.MessageInfo{
-			{SeqNum: 1, UID: "uid1"},
+	emailFetcher := &mockEmailFetcher{
+		uids: []string{"uid1"},
+		headers: map[string][]byte{
+			"uid1": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n"),
 		},
-		rawData: map[int][]byte{
-			1: []byte("email1"),
+		emails: map[string][]byte{
+			"uid1": []byte("email1"),
 		},
 	}
 	gmailClient := &mockGmailClient{shouldError: true}
 
-	RunSingleSync(context.Background(), account, cfg, db, pop3Client, gmailClient)
+	RunSingleSync(context.Background(), account, cfg, db, emailFetcher, gmailClient)
 
 	assert.Len(t, gmailClient.pushedEmails, 0)
 	assert.False(t, db.syncedUIDs["uid1"])
@@ -159,61 +156,82 @@ func TestRunSingleSync_MaxToCheck(t *testing.T) {
 	cfg := &config.Config{MaxMessagesToCheck: 2, SyncWindowDays: 30}
 	db := &mockDB{syncedUIDs: make(map[string]bool)}
 
-	// 5 messages, only last 2 should be inspected
-	pop3Client := &mockPop3Client{
-		messages: []pop3.MessageInfo{
-			{SeqNum: 1, UID: "uid1"},
-			{SeqNum: 2, UID: "uid2"},
-			{SeqNum: 3, UID: "uid3"},
-			{SeqNum: 4, UID: "uid4"},
-			{SeqNum: 5, UID: "uid5"},
+	emailFetcher := &mockEmailFetcher{
+		uids: []string{"uid1", "uid2", "uid3", "uid4", "uid5"},
+		headers: map[string][]byte{
+			"uid4": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n"),
+			"uid5": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n"),
 		},
-		rawData: map[int][]byte{
-			4: []byte("email4"),
-			5: []byte("email5"),
+		emails: map[string][]byte{
+			"uid4": []byte("email4"),
+			"uid5": []byte("email5"),
 		},
 	}
 	gmailClient := &mockGmailClient{}
 
-	RunSingleSync(context.Background(), account, cfg, db, pop3Client, gmailClient)
+	RunSingleSync(context.Background(), account, cfg, db, emailFetcher, gmailClient)
 
 	assert.Len(t, gmailClient.pushedEmails, 2)
-	assert.True(t, db.syncedUIDs["uid4"]) // seq 4
-	assert.True(t, db.syncedUIDs["uid5"]) // seq 5
+	assert.False(t, db.syncedUIDs["uid1"])
+	assert.False(t, db.syncedUIDs["uid2"])
+	assert.False(t, db.syncedUIDs["uid3"])
+	assert.True(t, db.syncedUIDs["uid4"])
+	assert.True(t, db.syncedUIDs["uid5"])
 }
 
-func TestRunSingleSync_TopFallbackAndWindow(t *testing.T) {
+func TestRunSingleSync_SyncWindow(t *testing.T) {
 	account := config.Account{Name: "test-account"}
 	cfg := &config.Config{SyncWindowDays: 7}
 	db := &mockDB{syncedUIDs: make(map[string]bool)}
 
-	// seq 3 newest, seq2 will force TOP error and use RETR fallback, seq1 is old and should stop the scan
 	now := time.Now()
 	old := now.AddDate(0, 0, -30)
 
-	pop3Client := &mockPop3Client{
-		messages: []pop3.MessageInfo{
-			{SeqNum: 1, UID: "uid1"},
-			{SeqNum: 2, UID: "uid2"},
-			{SeqNum: 3, UID: "uid3"},
+	emailFetcher := &mockEmailFetcher{
+		uids: []string{"uid1", "uid2", "uid3"},
+		headers: map[string][]byte{
+			"uid1": []byte("Date: " + old.Format(time.RFC1123Z) + "\r\n"),
+			"uid2": []byte("Date: " + now.Format(time.RFC1123Z) + "\r\n"),
+			"uid3": []byte("Date: " + now.Format(time.RFC1123Z) + "\r\n"),
 		},
-		rawData: map[int][]byte{
-			2: []byte("Date: " + now.Format(time.RFC1123Z) + "\r\nSubject: email2\r\n\r\nBody2"),
-			3: []byte("email3"),
-		},
-		topErrors: map[int]error{2: errors.New("TOP not supported")},
-		topHeaders: map[int]string{
-			1: "Date: " + old.Format(time.RFC1123Z) + "\r\nSubject: old\r\n\r\n",
-			3: "Date: " + now.Format(time.RFC1123Z) + "\r\nSubject: new\r\n\r\n",
+		emails: map[string][]byte{
+			"uid2": []byte("email2"),
+			"uid3": []byte("email3"),
 		},
 	}
 	gmailClient := &mockGmailClient{}
 
-	RunSingleSync(context.Background(), account, cfg, db, pop3Client, gmailClient)
+	RunSingleSync(context.Background(), account, cfg, db, emailFetcher, gmailClient)
 
-	// seq3 and seq2 should be pushed; seq1 is old and stops the scan
 	assert.Len(t, gmailClient.pushedEmails, 2)
-	assert.True(t, db.syncedUIDs["uid3"])
 	assert.True(t, db.syncedUIDs["uid2"])
+	assert.True(t, db.syncedUIDs["uid3"])
 	assert.False(t, db.syncedUIDs["uid1"])
+}
+
+func TestRunSingleSync_MessageIdDeduplication(t *testing.T) {
+	account := config.Account{Name: "test-account"}
+	cfg := &config.Config{}
+	db := &mockDB{syncedUIDs: make(map[string]bool)}
+	emailFetcher := &mockEmailFetcher{
+		uids: []string{"uid1", "uid2"},
+		headers: map[string][]byte{
+			"uid1": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\nMessage-ID: <existing-id>\r\n"),
+			"uid2": []byte("Date: " + time.Now().Format(time.RFC1123Z) + "\r\nMessage-ID: <new-id>\r\n"),
+		},
+		emails: map[string][]byte{
+			"uid1": []byte("email1"),
+			"uid2": []byte("email2"),
+		},
+	}
+	gmailClient := &mockGmailClient{
+		existingMessageIDs: map[string]bool{"<existing-id>": true},
+	}
+
+	RunSingleSync(context.Background(), account, cfg, db, emailFetcher, gmailClient)
+
+	assert.Len(t, gmailClient.pushedEmails, 1)
+	assert.Equal(t, "email2", string(gmailClient.pushedEmails[0]))
+	assert.True(t, db.syncedUIDs["uid1"])
+	assert.True(t, db.syncedUIDs["uid2"])
 }
