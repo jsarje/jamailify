@@ -18,17 +18,17 @@ The application must parse this updated `config.json` structure:
     {
       "name": "My Email",
       "protocol": "imap",
-      "imap_server": "imap.example.com:993",
-      "imap_user": "me@example.com",
-      "imap_pass": "supersecret",
+      "server": "imap.example.com:993",
+      "user": "me@example.com",
+      "pass": "supersecret",
       "gmail_refresh_token": "1//0eabc123..."
     },
     {
       "name": "Wife's Email",
       "protocol": "pop3",
-      "pop3_server": "pop.wife-example.com:995",
-      "pop3_user": "wife@wife-example.com",
-      "pop3_pass": "alsosecret",
+      "server": "pop.wife-example.com:995",
+      "user": "wife@wife-example.com",
+      "pass": "alsosecret",
       "gmail_refresh_token": "1//0exyz789..."
     }
   ]
