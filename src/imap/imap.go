@@ -9,7 +9,6 @@ import (
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"jamailify/src/config"
-	"jamailify/src/fetcher"
 )
 
 // IMAPClient implements the EmailFetcher interface for IMAP servers.
@@ -19,19 +18,23 @@ type IMAPClient struct {
 }
 
 // NewIMAPClient creates a new IMAP client.
-func NewIMAPClient(cfg *config.Account) (fetcher.EmailFetcher, error) {
+func NewIMAPClient(cfg *config.Account) (*IMAPClient, error) {
 	return &IMAPClient{cfg: cfg}, nil
 }
 
 // Connect connects to the IMAP server and authenticates.
 func (c *IMAPClient) Connect() error {
 	log.Printf("Connecting to IMAP server: %s", c.cfg.Server)
-	// Connect to the server
-	cl, err := client.DialTLS(c.cfg.Server, nil)
+	var err error
+	if c.cfg.NoTls {
+		c.client, err = client.Dial(c.cfg.Server)
+	} else {
+		c.client, err = client.DialTLS(c.cfg.Server, nil)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
-	c.client = cl
 
 	// Login
 	if err := c.client.Login(c.cfg.User, c.cfg.Pass); err != nil {
@@ -52,7 +55,7 @@ func (c *IMAPClient) GetUIDs() ([]string, error) {
 	// Search for all messages
 	criteria := imap.NewSearchCriteria()
 	criteria.WithoutFlags = []string{imap.DeletedFlag}
-	uids, err := c.client.Search(criteria)
+	uids, err := c.client.UidSearch(criteria)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for messages: %w", err)
 	}
@@ -77,7 +80,7 @@ func (c *IMAPClient) DownloadEmail(uid string) ([]byte, error) {
 
 func (c *IMAPClient) download(uidStr string, headersOnly bool) ([]byte, error) {
 	seqset := new(imap.SeqSet)
-	uid, err := strconv.Atoi(uidStr)
+	uid, err := strconv.ParseUint(uidStr, 10, 32)
 	if err != nil {
 		return nil, fmt.Errorf("invalid UID: %s", uidStr)
 	}

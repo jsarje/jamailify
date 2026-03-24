@@ -40,7 +40,7 @@ Please generate the following `_test.go` files alongside their respective implem
     * Verify that a dummy raw RFC 2822 byte array is correctly encoded using `base64.URLEncoding` (without padding).
     * Verify the mock `Insert` method is called exactly once per `PushEmail` invocation.
 
-## POP3 Integration Testing (`pop3_client/pop3_integration_test.go`)
+## 4. POP3 Integration Testing (`pop3_client/pop3_integration_test.go`)
 
 ### Overview
 Skip unit testing with mocks for the POP3 client. Instead, implement an integration test using Docker to verify the POP3 fetching logic against a real, running mail server.
@@ -75,4 +75,35 @@ Ensure the `pop3_client` is built to accept dynamic hosts and ports rather than 
 * **Test Cases:**
     * **The Happy Path:** Mock POP3 returns 2 UIDs. DB says both are new. Mock POP3 downloads both. Mock Gmail pushes both. DB marks both as synced.
     * **The Partial Sync:** Mock POP3 returns 3 UIDs. DB says 2 are already synced. Mock POP3 only downloads the 1 new email. Mock Gmail pushes 1 email. DB marks 1 as synced.
-    * **The Error Path:** If pushing to Gmail fails, ensure `MarkSynced` is **NOT** called for that UID, so it can be retried on the next run.
+        * **The Error Path:** If pushing to Gmail fails, ensure `MarkSynced` is **NOT** called for that UID, so it can be retried on the next run.
+    
+    ## 6. IMAP Integration Testing (`imap_client/imap_integration_test.go`)
+    
+    ### Overview
+    Skip unit testing with mocks for the IMAP client. Instead, implement an integration test using Docker to verify the IMAP fetching logic against a real, running mail server.
+    
+    ### Tools & Libraries
+    * **Container Management:** Use `github.com/testcontainers/testcontainers-go` to programmatically manage the Docker container lifecycle within the Go test.
+    * **Test Mail Server Image:** Use the `greenmail/standalone:latest` Docker image. This is a lightweight, open-source test mail server that provides both IMAP and SMTP out of the box without complex configuration.
+    
+    ### Integration Test Lifecycle & Setup
+    1. **Setup:**
+       * Use `testcontainers.GenericContainer` to spin up `greenmail/standalone`.
+       * Map the container's default IMAP port (3143) and SMTP port (3025) to random available ports on the host to avoid CI/CD port conflicts.
+       * Configure GreenMail with a test user via environment variables (e.g., `GREENMAIL_OPTS=-Dgreenmail.setup.test.all -Dgreenmail.users=testuser:testpass@example.com`).
+    2. **Seed Data (SMTP):**
+       * Write a helper function in the test that connects to the mapped SMTP port using standard Go `net/smtp`.
+       * Send 2-3 raw RFC 2822 dummy emails to the `testuser@example.com` inbox.
+    3. **Execution (IMAP):**
+       * Instantiate the `imap_client` using the mapped IMAP port and the test credentials.
+       * Call the function to fetch UIDs.
+       * Call the function to download the raw emails.
+    4. **Assertions:**
+       * Assert that the correct number of UIDs were returned.
+       * Assert that the downloaded raw email bytes match the payloads that were injected via SMTP.
+    5. **Teardown:**
+       * Use `defer container.Terminate(ctx)` to ensure the Docker container is destroyed immediately after the test finishes, even if it fails.
+    
+    ### Refactoring Note for AI
+    Ensure the `imap_client` is built to accept dynamic hosts and ports rather than hardcoding port 993 or forcing TLS, so that it can connect to the unencrypted local GreenMail container during testing, but use TLS in production based on the `config.json`.
+    
