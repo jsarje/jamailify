@@ -32,7 +32,7 @@ func (c *POP3Client) Connect() error {
 	p := pop3.New(pop3.Opt{
 		Host:       host,
 		Port:       port,
-		TLSEnabled: true,
+		TLSEnabled: !c.cfg.NoTls,
 	})
 
 	conn, err := p.NewConn()

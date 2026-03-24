@@ -14,6 +14,7 @@ type Account struct {
 	User              string `json:"user"`
 	Pass              string `json:"pass"`
 	GmailRefreshToken string `json:"gmail_refresh_token"`
+	NoTls             bool   `json:"no_tls,omitempty"`
 }
 
 type Config struct {

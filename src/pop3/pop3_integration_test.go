@@ -3,6 +3,7 @@ package pop3
 import (
 	"context"
 	"fmt"
+	"jamailify/src/config"
 	"log"
 	"net"
 	"net/smtp"
@@ -62,21 +63,29 @@ func TestPop3Integration(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// 3. Execution (POP3)
-	pop3Client, err := NewClient(host, pop3Port.Int(), "testuser", "testpass", false)
+	pop3Client, err := NewPOP3Client(&config.Account{
+		Server: fmt.Sprintf("%s:%d", host, pop3Port.Int()),
+		User:   "testuser",
+		Pass:   "testpass",
+		NoTls:  true,
+	})
+	require.NoError(t, err)
+
+	err = pop3Client.Connect()
 	require.NoError(t, err)
 	defer pop3Client.Close()
 
-	messages, err := pop3Client.ListMessages()
+	uids, err := pop3Client.GetUIDs()
 	require.NoError(t, err)
 
 	// 4. Assertions
-	assert.Len(t, messages, 2, "Should have fetched 2 UIDs")
+	assert.Len(t, uids, 2, "Should have fetched 2 UIDs")
 
-	if len(messages) == 2 {
+	if len(uids) == 2 {
 		var email1Found, email2Found bool
-		for _, msg := range messages {
-			retrievedEmail, err := pop3Client.GetMessage(msg.SeqNum)
-			require.NoErrorf(t, err, "failed to RETR seq=%d uid=%s", msg.SeqNum, msg.UID)
+		for _, uid := range uids {
+			retrievedEmail, err := pop3Client.DownloadEmail(uid)
+			require.NoErrorf(t, err, "failed to RETR uid=%s", uid)
 			if strings.Contains(string(retrievedEmail), "Subject: Test Email 1") {
 				assert.Contains(t, string(retrievedEmail), "This is the first email.")
 				email1Found = true
