@@ -6,9 +6,12 @@ import (
 	"log"
 	"strconv"
 
+	"jamailify/src/config"
+	"jamailify/src/oauth"
+
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
-	"jamailify/src/config"
+	"github.com/emersion/go-sasl"
 )
 
 // IMAPClient implements the EmailFetcher interface for IMAP servers.
@@ -36,10 +39,10 @@ func (c *IMAPClient) Connect() error {
 		return fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
 
-	// Login
-	if err := c.client.Login(c.cfg.User, c.cfg.Pass); err != nil {
-		return fmt.Errorf("failed to login to IMAP server: %w", err)
+	if err := c.authenticate(); err != nil {
+		return err
 	}
+
 	log.Println("Connected to IMAP server")
 
 	// Select INBOX
@@ -47,6 +50,27 @@ func (c *IMAPClient) Connect() error {
 		return fmt.Errorf("failed to select INBOX: %w", err)
 	}
 
+	return nil
+}
+
+// authenticate handles IMAP authentication using password or Microsoft OAuth2.
+func (c *IMAPClient) authenticate() error {
+	if c.cfg.AuthMethod == "oauth2" {
+		accessToken, err := oauth.GetMSAccessToken(c.cfg.MSClientID, c.cfg.MSClientSecret, c.cfg.MSRefreshToken)
+		if err != nil {
+			return fmt.Errorf("IMAP OAuth2 authentication failed — could not obtain access token: %w", err)
+		}
+		saslClient := newXOAUTH2Client(c.cfg.User, accessToken)
+		if err := c.client.Authenticate(saslClient); err != nil {
+			return fmt.Errorf("IMAP OAuth2 SASL authentication failed: %w", err)
+		}
+		return nil
+	}
+
+	// Default: password-based login
+	if err := c.client.Login(c.cfg.User, c.cfg.Pass); err != nil {
+		return fmt.Errorf("IMAP password login failed: %w", err)
+	}
 	return nil
 }
 
@@ -125,4 +149,26 @@ func (c *IMAPClient) Close() error {
 		return c.client.Logout()
 	}
 	return nil
+}
+
+type xoauth2Client struct {
+	username string
+	token    string
+}
+
+func newXOAUTH2Client(username, token string) sasl.Client {
+	return &xoauth2Client{
+		username: username,
+		token:    token,
+	}
+}
+
+func (c *xoauth2Client) Start() (mech string, ir []byte, err error) {
+	mech = "XOAUTH2"
+	ir = []byte("user=" + c.username + "\x01auth=Bearer " + c.token + "\x01\x01")
+	return mech, ir, nil
+}
+
+func (c *xoauth2Client) Next(challenge []byte) (response []byte, err error) {
+	return nil, sasl.ErrUnexpectedServerChallenge
 }

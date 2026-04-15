@@ -1,7 +1,7 @@
 # Feature Specification: Microsoft Outlook/Hotmail OAuth2 for IMAP
 
 ## Overview
-Update the self-hosted Gmailify application to support fetching emails from Microsoft (Hotmail/Outlook.com/Office365) IMAP servers using OAuth2 authentication instead of standard passwords. This requires implementing SASL XOAUTH2 authentication during the IMAP connection phase.
+Update the self-hosted Jamailify application to support fetching emails from Microsoft (Hotmail/Outlook.com/Office365) IMAP servers using OAuth2 authentication instead of standard passwords. This requires implementing SASL XOAUTH2 authentication during the IMAP connection phase.
 
 ## 1. Required Third-Party Libraries
 * OAuth2 base: `golang.org/x/oauth2`

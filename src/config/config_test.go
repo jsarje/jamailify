@@ -132,6 +132,138 @@ func TestLoadConfig(t *testing.T) {
 			expectError:   true,
 			expectedError: "protocol must be 'pop3' or 'imap'",
 		},
+		{
+			name: "Valid OAuth2 IMAP account",
+			path: func(t *testing.T) string {
+				content := `{
+					"poll_interval_minutes": 10,
+					"google_client_id": "google_id",
+					"google_client_secret": "google_secret",
+					"accounts": [
+						{
+							"name": "Outlook Account",
+							"protocol": "imap",
+							"server": "outlook.office365.com:993",
+							"user": "me@outlook.com",
+							"auth_method": "oauth2",
+							"ms_client_id": "azure-client-id",
+							"ms_client_secret": "azure-client-secret",
+							"ms_refresh_token": "refresh-token",
+							"gmail_refresh_token": "gmail-token"
+						}
+					]
+				}`
+				f, err := os.CreateTemp("", "oauth2_imap_config.json")
+				require.NoError(t, err)
+				t.Cleanup(func() { os.Remove(f.Name()) })
+				_, err = f.WriteString(content)
+				require.NoError(t, err)
+				f.Close()
+				return f.Name()
+			},
+			expectError: false,
+			check: func(t *testing.T, config *Config) {
+				require.Len(t, config.Accounts, 1)
+				acc := config.Accounts[0]
+				assert.Equal(t, "oauth2", acc.AuthMethod)
+				assert.Equal(t, "azure-client-id", acc.MSClientID)
+				assert.Equal(t, "azure-client-secret", acc.MSClientSecret)
+				assert.Equal(t, "refresh-token", acc.MSRefreshToken)
+				assert.Empty(t, acc.Pass)
+			},
+		},
+		{
+			name: "OAuth2 IMAP account missing ms_client_id",
+			path: func(t *testing.T) string {
+				content := `{
+					"poll_interval_minutes": 10,
+					"google_client_id": "gid",
+					"google_client_secret": "gsecret",
+					"accounts": [
+						{
+							"name": "Outlook Account",
+							"protocol": "imap",
+							"server": "outlook.office365.com:993",
+							"user": "me@outlook.com",
+							"auth_method": "oauth2",
+							"ms_client_secret": "azure-client-secret",
+							"ms_refresh_token": "refresh-token",
+							"gmail_refresh_token": "gmail-token"
+						}
+					]
+				}`
+				f, err := os.CreateTemp("", "oauth2_missing_client_id.json")
+				require.NoError(t, err)
+				t.Cleanup(func() { os.Remove(f.Name()) })
+				_, err = f.WriteString(content)
+				require.NoError(t, err)
+				f.Close()
+				return f.Name()
+			},
+			expectError:   true,
+			expectedError: "ms_client_id is required",
+		},
+		{
+			name: "OAuth2 IMAP account missing ms_refresh_token",
+			path: func(t *testing.T) string {
+				content := `{
+					"poll_interval_minutes": 10,
+					"google_client_id": "gid",
+					"google_client_secret": "gsecret",
+					"accounts": [
+						{
+							"name": "Outlook Account",
+							"protocol": "imap",
+							"server": "outlook.office365.com:993",
+							"user": "me@outlook.com",
+							"auth_method": "oauth2",
+							"ms_client_id": "azure-client-id",
+							"ms_client_secret": "azure-client-secret",
+							"gmail_refresh_token": "gmail-token"
+						}
+					]
+				}`
+				f, err := os.CreateTemp("", "oauth2_missing_refresh.json")
+				require.NoError(t, err)
+				t.Cleanup(func() { os.Remove(f.Name()) })
+				_, err = f.WriteString(content)
+				require.NoError(t, err)
+				f.Close()
+				return f.Name()
+			},
+			expectError:   true,
+			expectedError: "ms_refresh_token is required",
+		},
+		{
+			name: "Invalid auth_method value",
+			path: func(t *testing.T) string {
+				content := `{
+					"poll_interval_minutes": 10,
+					"google_client_id": "gid",
+					"google_client_secret": "gsecret",
+					"accounts": [
+						{
+							"name": "Account",
+							"protocol": "imap",
+							"server": "imap.example.com:993",
+							"user": "user1",
+							"pass": "pass1",
+							"auth_method": "kerberos",
+							"gmail_refresh_token": "gmail-token"
+						}
+					]
+				}`
+				f, err := os.CreateTemp("", "invalid_auth_method.json")
+				require.NoError(t, err)
+				t.Cleanup(func() { os.Remove(f.Name()) })
+				_, err = f.WriteString(content)
+				require.NoError(t, err)
+				f.Close()
+				return f.Name()
+			},
+			expectError:   true,
+			expectedError: "auth_method must be 'password' or 'oauth2'",
+		},
 	}
 
 	for _, tc := range testCases {
