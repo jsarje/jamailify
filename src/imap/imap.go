@@ -2,22 +2,28 @@ package imap
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"log"
+	"net"
 	"strconv"
+	"strings"
 
 	"jamailify/src/config"
 	"jamailify/src/oauth"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	"github.com/emersion/go-imap/commands"
+	"github.com/emersion/go-imap/responses"
 	"github.com/emersion/go-sasl"
 )
 
 // IMAPClient implements the EmailFetcher interface for IMAP servers.
 type IMAPClient struct {
-	cfg    *config.Account
-	client *client.Client
+	cfg        *config.Account
+	client     *client.Client
+	normalizer *exchangeResponseNormalizerConn
 }
 
 // NewIMAPClient creates a new IMAP client.
@@ -28,15 +34,18 @@ func NewIMAPClient(cfg *config.Account) (*IMAPClient, error) {
 // Connect connects to the IMAP server and authenticates.
 func (c *IMAPClient) Connect() error {
 	log.Printf("Connecting to IMAP server: %s", c.cfg.Server)
-	var err error
-	if c.cfg.NoTls {
-		c.client, err = client.Dial(c.cfg.Server)
-	} else {
-		c.client, err = client.DialTLS(c.cfg.Server, nil)
+	conn, err := c.dial()
+	if err != nil {
+		return err
 	}
 
+	c.client, err = client.New(conn)
 	if err != nil {
-		return fmt.Errorf("failed to connect to IMAP server: %w", err)
+		return fmt.Errorf("failed to initialize IMAP client: %w", err)
+	}
+
+	if normalizer, ok := conn.(*exchangeResponseNormalizerConn); ok {
+		c.normalizer = normalizer
 	}
 
 	if err := c.authenticate(); err != nil {
@@ -53,6 +62,27 @@ func (c *IMAPClient) Connect() error {
 	return nil
 }
 
+func (c *IMAPClient) dial() (net.Conn, error) {
+	if c.cfg.NoTls {
+		conn, err := net.Dial("tcp", c.cfg.Server)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
+		}
+		return newExchangeResponseNormalizerConn(conn), nil
+	}
+
+	host, _, err := net.SplitHostPort(c.cfg.Server)
+	if err != nil {
+		return nil, fmt.Errorf("invalid IMAP server address %q: %w", c.cfg.Server, err)
+	}
+
+	tlsConn, err := tls.Dial("tcp", c.cfg.Server, &tls.Config{ServerName: host})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
+	}
+	return newExchangeResponseNormalizerConn(tlsConn), nil
+}
+
 // authenticate handles IMAP authentication using password or Microsoft OAuth2.
 func (c *IMAPClient) authenticate() error {
 	if c.cfg.AuthMethod == "oauth2" {
@@ -60,10 +90,10 @@ func (c *IMAPClient) authenticate() error {
 		if err != nil {
 			return fmt.Errorf("IMAP OAuth2 authentication failed — could not obtain access token: %w", err)
 		}
-		saslClient := newXOAUTH2Client(c.cfg.User, accessToken)
-		if err := c.client.Authenticate(saslClient); err != nil {
+		if err := c.authenticateXOAUTH2(accessToken); err != nil {
 			return fmt.Errorf("IMAP OAuth2 SASL authentication failed: %w", err)
 		}
+		c.disableResponseNormalization()
 		return nil
 	}
 
@@ -71,6 +101,64 @@ func (c *IMAPClient) authenticate() error {
 	if err := c.client.Login(c.cfg.User, c.cfg.Pass); err != nil {
 		return fmt.Errorf("IMAP password login failed: %w", err)
 	}
+	c.disableResponseNormalization()
+	return nil
+}
+
+func (c *IMAPClient) disableResponseNormalization() {
+	if c.normalizer != nil {
+		c.normalizer.DisableNormalization()
+	}
+}
+
+func (c *IMAPClient) authenticateXOAUTH2(accessToken string) error {
+	supported, err := c.client.SupportAuth("XOAUTH2")
+	if err != nil {
+		return fmt.Errorf("check XOAUTH2 support: %w", err)
+	}
+	if !supported {
+		return fmt.Errorf("server does not support XOAUTH2")
+	}
+
+	saslClient := newXOAUTH2Client(c.cfg.User, accessToken)
+	mechanism, initialResponse, err := saslClient.Start()
+	if err != nil {
+		return fmt.Errorf("start XOAUTH2 exchange: %w", err)
+	}
+
+	cmd := &commands.Authenticate{Mechanism: mechanism}
+	initialResponseInline, err := c.client.Support("SASL-IR")
+	if err != nil {
+		return fmt.Errorf("check SASL-IR support: %w", err)
+	}
+	if initialResponseInline {
+		cmd.InitialResponse = initialResponse
+	}
+
+	res := &responses.Authenticate{
+		Mechanism: saslClient,
+		RepliesCh: make(chan []byte, 10),
+	}
+	if !initialResponseInline {
+		res.InitialResponse = initialResponse
+	}
+
+	status, err := c.client.Execute(cmd, res)
+	if err != nil {
+		return err
+	}
+	if err := status.Err(); err != nil {
+		return err
+	}
+	if err := exchangeAuthStatusError(status); err != nil {
+		return err
+	}
+
+	c.client.SetState(imap.AuthenticatedState, nil)
+	if _, err := c.client.Capability(); err != nil {
+		return fmt.Errorf("refresh capabilities after XOAUTH2 auth: %w", err)
+	}
+
 	return nil
 }
 
@@ -171,4 +259,26 @@ func (c *xoauth2Client) Start() (mech string, ir []byte, err error) {
 
 func (c *xoauth2Client) Next(challenge []byte) (response []byte, err error) {
 	return nil, sasl.ErrUnexpectedServerChallenge
+}
+
+func exchangeAuthStatusError(status *imap.StatusResp) error {
+	if status == nil {
+		return nil
+	}
+
+	code := string(status.Code)
+	if !strings.HasPrefix(code, "ERROR=") {
+		return nil
+	}
+
+	parts := []string{code}
+	for _, argument := range status.Arguments {
+		text, ok := argument.(string)
+		if !ok || text == "" {
+			continue
+		}
+		parts = append(parts, text)
+	}
+
+	return fmt.Errorf("server reported authentication failure: %s", strings.Join(parts, " "))
 }
