@@ -24,7 +24,7 @@ type DBOperations interface {
 }
 
 type GmailOperations interface {
-	PushEmail(ctx context.Context, rawEmail []byte) error
+	PushEmail(ctx context.Context, rawEmail []byte) (*gmail.PushResult, error)
 	MessageIdExists(ctx context.Context, messageId string) (bool, error)
 }
 
@@ -117,7 +117,8 @@ func RunSingleSync(ctx context.Context, account config.Account, cfg *config.Conf
 			continue
 		}
 
-		if err := gmailClient.PushEmail(ctx, rawEmail); err != nil {
+		pushResult, err := gmailClient.PushEmail(ctx, rawEmail)
+		if err != nil {
 			log.Printf("[%s] ERROR: Failed to push email with UID %s to Gmail: %v", account.Name, uid, err)
 			continue
 		}
@@ -127,7 +128,7 @@ func RunSingleSync(ctx context.Context, account config.Account, cfg *config.Conf
 			continue
 		}
 
-		log.Printf("[%s] Successfully synced and pushed email with UID: %s", account.Name, uid)
+		log.Printf("[%s] Successfully synced and pushed email with UID: %s (gmail_message_id=%s labels=%v internal_date=%d)", account.Name, uid, pushResult.MessageID, pushResult.LabelIDs, pushResult.InternalDate)
 	}
 	log.Printf("[%s] Sync cycle finished", account.Name)
 }

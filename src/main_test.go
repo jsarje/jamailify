@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"jamailify/src/config"
+	"jamailify/src/gmail"
 	"testing"
 	"time"
 
@@ -26,15 +27,15 @@ func (m *mockDB) MarkSynced(accountName, uid string) error {
 
 // Mock EmailFetcher
 type mockEmailFetcher struct {
-	uids         []string
-	headers      map[string][]byte
-	emails       map[string][]byte
-	connectErr   error
-	uidsErr      error
-	headersErr   error
-	emailErr     error
-	closeErr     error
-	calledClose  bool
+	uids          []string
+	headers       map[string][]byte
+	emails        map[string][]byte
+	connectErr    error
+	uidsErr       error
+	headersErr    error
+	emailErr      error
+	closeErr      error
+	calledClose   bool
 	calledConnect bool
 }
 
@@ -69,12 +70,12 @@ type mockGmailClient struct {
 	shouldError        bool
 }
 
-func (m *mockGmailClient) PushEmail(ctx context.Context, rawEmail []byte) error {
+func (m *mockGmailClient) PushEmail(ctx context.Context, rawEmail []byte) (*gmail.PushResult, error) {
 	if m.shouldError {
-		return errors.New("failed to push email")
+		return nil, errors.New("failed to push email")
 	}
 	m.pushedEmails = append(m.pushedEmails, rawEmail)
-	return nil
+	return &gmail.PushResult{MessageID: "gmail-message-id", LabelIDs: []string{"INBOX"}}, nil
 }
 
 func (m *mockGmailClient) MessageIdExists(ctx context.Context, messageId string) (bool, error) {
