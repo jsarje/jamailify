@@ -122,9 +122,10 @@ func (l *listCallAdapter) Do(opts ...googleapi.CallOption) (*gmail.ListMessagesR
 }
 
 type Client struct {
-	importer MessageImporter
-	getter   MessageGetter
-	lister   MessageLister
+	importer                 MessageImporter
+	getter                   MessageGetter
+	lister                   MessageLister
+	fetchMetadataAfterImport bool
 }
 
 type PushResult struct {
@@ -136,7 +137,7 @@ type PushResult struct {
 
 // NewClient creates a Gmail client using the provided OAuth2 credentials.
 // The ctx provided will be used for creating the underlying Gmail service.
-func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string) (*Client, error) {
+func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string, fetchMetadataAfterImport bool) (*Client, error) {
 	cfg := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
@@ -154,7 +155,12 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string)
 	}
 
 	adapter := &gmailAPIAdapter{service: srv}
-	return &Client{importer: adapter, getter: adapter, lister: adapter}, nil
+	return &Client{
+		importer:                 adapter,
+		getter:                   adapter,
+		lister:                   adapter,
+		fetchMetadataAfterImport: fetchMetadataAfterImport,
+	}, nil
 }
 
 // PushEmail pushes a raw RFC2822 email to the authenticated user's mailbox.
@@ -175,7 +181,7 @@ func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) (*PushResult,
 	}
 
 	resolved := imported
-	if c.getter != nil {
+	if c.fetchMetadataAfterImport && c.getter != nil {
 		resolved, err = c.getter.Get("me", imported.Id).
 			Context(ctx).
 			Format("metadata").

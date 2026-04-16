@@ -191,7 +191,7 @@ func main() {
 				}
 				defer emailFetcher.Close()
 
-				gmailClient, err := gmail.NewClient(ctx, cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken)
+				gmailClient, err := gmail.NewClient(ctx, cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken, cfg.GmailFetchMetadataAfterImport)
 				if err != nil {
 					log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
 					return

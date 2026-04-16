@@ -118,26 +118,47 @@ func (m *MockMessageLister) List(userId string) ListCall {
 	return args.Get(0).(ListCall)
 }
 
-func TestPushEmail(t *testing.T) {
+func TestPushEmail_DefaultDoesNotFetchMetadataAfterImport(t *testing.T) {
 	mockImporter := new(MockMessageImporter)
 	mockImportCall := new(MockImportCall)
-	mockGetter := new(MockMessageGetter)
-	mockGetCall := new(MockGetCall)
-	mockLister := new(MockMessageLister)
-	mockListCall := new(MockListCall)
 
-	client := &Client{importer: mockImporter, getter: mockGetter, lister: mockLister}
+	client := &Client{importer: mockImporter}
 
 	rawEmail := []byte("Message-ID: <abc@example.com>\nFrom: from@example.com\nTo: to@example.com\nSubject: Test\n\nTest Body")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
-	// Set up the lister expectations: search returns no existing messages.
-	mockLister.On("List", "me").Return(mockListCall)
-	mockListCall.On("Q", mock.Anything).Return(mockListCall)
-	mockListCall.On("MaxResults", int64(1)).Return(mockListCall)
-	mockListCall.On("Do").Return(&gmail.ListMessagesResponse{Messages: nil}, nil)
-
 	// Set up the importer expectation.
+	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
+		return msg.Raw == expectedEncodedEmail
+	})).Return(mockImportCall)
+	mockImportCall.On("Context", mock.Anything).Return(mockImportCall)
+	mockImportCall.On("Fields").Return(mockImportCall)
+	mockImportCall.On("InternalDateSource", "receivedTime").Return(mockImportCall)
+	mockImportCall.On("Do").Return(&gmail.Message{Id: "gmail-message-id", LabelIds: []string{"INBOX"}, InternalDate: 1234}, nil)
+
+	// Call the method.
+	result, err := client.PushEmail(context.Background(), rawEmail)
+
+	// Assert that the expectations were met.
+	assert.NoError(t, err)
+	assert.Equal(t, "gmail-message-id", result.MessageID)
+	assert.Equal(t, []string{"INBOX"}, result.LabelIDs)
+	assert.EqualValues(t, 1234, result.InternalDate)
+	mockImporter.AssertExpectations(t)
+	mockImportCall.AssertExpectations(t)
+}
+
+func TestPushEmail_FetchesMetadataAfterImportWhenEnabled(t *testing.T) {
+	mockImporter := new(MockMessageImporter)
+	mockImportCall := new(MockImportCall)
+	mockGetter := new(MockMessageGetter)
+	mockGetCall := new(MockGetCall)
+
+	client := &Client{importer: mockImporter, getter: mockGetter, fetchMetadataAfterImport: true}
+
+	rawEmail := []byte("Message-ID: <abc@example.com>\nFrom: from@example.com\nTo: to@example.com\nSubject: Test\n\nTest Body")
+	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
+
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
 		return msg.Raw == expectedEncodedEmail
 	})).Return(mockImportCall)
@@ -151,10 +172,8 @@ func TestPushEmail(t *testing.T) {
 	mockGetCall.On("Fields").Return(mockGetCall)
 	mockGetCall.On("Do").Return(&gmail.Message{Id: "gmail-message-id", LabelIds: []string{"INBOX"}, InternalDate: 1234}, nil)
 
-	// Call the method.
 	result, err := client.PushEmail(context.Background(), rawEmail)
 
-	// Assert that the expectations were met.
 	assert.NoError(t, err)
 	assert.Equal(t, "gmail-message-id", result.MessageID)
 	assert.Equal(t, []string{"INBOX"}, result.LabelIDs)

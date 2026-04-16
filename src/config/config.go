@@ -27,10 +27,11 @@ type Account struct {
 }
 
 type Config struct {
-	PollIntervalMinutes int       `json:"poll_interval_minutes"`
-	GoogleClientID      string    `json:"google_client_id"`
-	GoogleClientSecret  string    `json:"google_client_secret"`
-	Accounts            []Account `json:"accounts"`
+	PollIntervalMinutes           int       `json:"poll_interval_minutes"`
+	GoogleClientID                string    `json:"google_client_id"`
+	GoogleClientSecret            string    `json:"google_client_secret"`
+	GmailFetchMetadataAfterImport bool      `json:"gmail_fetch_metadata_after_import,omitempty"`
+	Accounts                      []Account `json:"accounts"`
 	// MaxMessagesToCheck limits how many newest messages will be inspected per run.
 	// If zero, a sensible default is used (2000).
 	MaxMessagesToCheck int `json:"max_messages_to_check"`

@@ -47,6 +47,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, 15, config.PollIntervalMinutes)
 				assert.Equal(t, "google_id", config.GoogleClientID)
 				assert.Equal(t, "google_secret", config.GoogleClientSecret)
+				assert.False(t, config.GmailFetchMetadataAfterImport)
 				require.Len(t, config.Accounts, 1)
 				assert.Equal(t, "account1", config.Accounts[0].Name)
 				assert.Equal(t, "pop3", config.Accounts[0].Protocol)
@@ -165,11 +166,44 @@ func TestLoadConfig(t *testing.T) {
 			check: func(t *testing.T, config *Config) {
 				require.Len(t, config.Accounts, 1)
 				acc := config.Accounts[0]
+				assert.False(t, config.GmailFetchMetadataAfterImport)
 				assert.Equal(t, "oauth2", acc.AuthMethod)
 				assert.Equal(t, "azure-client-id", acc.MSClientID)
 				assert.Equal(t, "azure-client-secret", acc.MSClientSecret)
 				assert.Equal(t, "refresh-token", acc.MSRefreshToken)
 				assert.Empty(t, acc.Pass)
+			},
+		},
+		{
+			name: "Gmail metadata import flag enabled",
+			path: func(t *testing.T) string {
+				content := `{
+					"poll_interval_minutes": 15,
+					"google_client_id": "google_id",
+					"google_client_secret": "google_secret",
+					"gmail_fetch_metadata_after_import": true,
+					"accounts": [
+						{
+							"name": "account1",
+							"protocol": "pop3",
+							"server": "pop.example.com:995",
+							"user": "user1",
+							"pass": "pass1",
+							"gmail_refresh_token": "token1"
+						}
+					]
+				}`
+				f, err := os.CreateTemp("", "gmail_metadata_flag_config.json")
+				require.NoError(t, err)
+				t.Cleanup(func() { os.Remove(f.Name()) })
+				_, err = f.WriteString(content)
+				require.NoError(t, err)
+				f.Close()
+				return f.Name()
+			},
+			expectError: false,
+			check: func(t *testing.T, config *Config) {
+				assert.True(t, config.GmailFetchMetadataAfterImport)
 			},
 		},
 		{
