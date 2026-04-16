@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"jamailify/src/config"
 	"jamailify/src/oauth"
@@ -19,11 +20,15 @@ import (
 	"github.com/emersion/go-sasl"
 )
 
+const (
+	imapGreetingTimeout = 15 * time.Second
+	imapCommandTimeout  = 30 * time.Second
+)
+
 // IMAPClient implements the EmailFetcher interface for IMAP servers.
 type IMAPClient struct {
-	cfg        *config.Account
-	client     *client.Client
-	normalizer *exchangeResponseNormalizerConn
+	cfg    *config.Account
+	client *client.Client
 }
 
 // NewIMAPClient creates a new IMAP client.
@@ -38,15 +43,18 @@ func (c *IMAPClient) Connect() error {
 	if err != nil {
 		return err
 	}
+	if err := conn.SetDeadline(time.Now().Add(imapGreetingTimeout)); err != nil {
+		return fmt.Errorf("set IMAP greeting deadline: %w", err)
+	}
 
 	c.client, err = client.New(conn)
 	if err != nil {
 		return fmt.Errorf("failed to initialize IMAP client: %w", err)
 	}
-
-	if normalizer, ok := conn.(*exchangeResponseNormalizerConn); ok {
-		c.normalizer = normalizer
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("clear IMAP greeting deadline: %w", err)
 	}
+	c.client.Timeout = imapCommandTimeout
 
 	if err := c.authenticate(); err != nil {
 		return err
@@ -63,12 +71,14 @@ func (c *IMAPClient) Connect() error {
 }
 
 func (c *IMAPClient) dial() (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: imapGreetingTimeout}
+
 	if c.cfg.NoTls {
-		conn, err := net.Dial("tcp", c.cfg.Server)
+		conn, err := dialer.Dial("tcp", c.cfg.Server)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
 		}
-		return newExchangeResponseNormalizerConn(conn), nil
+		return conn, nil
 	}
 
 	host, _, err := net.SplitHostPort(c.cfg.Server)
@@ -76,16 +86,17 @@ func (c *IMAPClient) dial() (net.Conn, error) {
 		return nil, fmt.Errorf("invalid IMAP server address %q: %w", c.cfg.Server, err)
 	}
 
-	tlsConn, err := tls.Dial("tcp", c.cfg.Server, &tls.Config{ServerName: host})
+	tlsConn, err := tls.DialWithDialer(dialer, "tcp", c.cfg.Server, &tls.Config{ServerName: host})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
-	return newExchangeResponseNormalizerConn(tlsConn), nil
+	return tlsConn, nil
 }
 
 // authenticate handles IMAP authentication using password or Microsoft OAuth2.
 func (c *IMAPClient) authenticate() error {
 	if c.cfg.AuthMethod == "oauth2" {
+		log.Printf("Authenticating to IMAP with OAuth2 for %s", c.cfg.User)
 		accessToken, err := oauth.GetMSAccessToken(c.cfg.MSClientID, c.cfg.MSClientSecret, c.cfg.MSRefreshToken)
 		if err != nil {
 			return fmt.Errorf("IMAP OAuth2 authentication failed — could not obtain access token: %w", err)
@@ -93,7 +104,6 @@ func (c *IMAPClient) authenticate() error {
 		if err := c.authenticateXOAUTH2(accessToken); err != nil {
 			return fmt.Errorf("IMAP OAuth2 SASL authentication failed: %w", err)
 		}
-		c.disableResponseNormalization()
 		return nil
 	}
 
@@ -101,14 +111,7 @@ func (c *IMAPClient) authenticate() error {
 	if err := c.client.Login(c.cfg.User, c.cfg.Pass); err != nil {
 		return fmt.Errorf("IMAP password login failed: %w", err)
 	}
-	c.disableResponseNormalization()
 	return nil
-}
-
-func (c *IMAPClient) disableResponseNormalization() {
-	if c.normalizer != nil {
-		c.normalizer.DisableNormalization()
-	}
 }
 
 func (c *IMAPClient) authenticateXOAUTH2(accessToken string) error {
@@ -155,9 +158,6 @@ func (c *IMAPClient) authenticateXOAUTH2(accessToken string) error {
 	}
 
 	c.client.SetState(imap.AuthenticatedState, nil)
-	if _, err := c.client.Capability(); err != nil {
-		return fmt.Errorf("refresh capabilities after XOAUTH2 auth: %w", err)
-	}
 
 	return nil
 }

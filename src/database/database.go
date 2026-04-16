@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "github.com/glebarez/go-sqlite"
 )
@@ -17,7 +18,71 @@ func NewDB(path string) (*DB, error) {
 		return nil, fmt.Errorf("open db %s: %w", path, err)
 	}
 
-	_, err = db.Exec(`
+	if err := ensureSyncedEmailsSchema(db); err != nil {
+		return nil, fmt.Errorf("ensure table: %w", err)
+	}
+
+	return &DB{db}, nil
+}
+
+func ensureSyncedEmailsSchema(db *sql.DB) error {
+	columns, err := syncedEmailsColumns(db)
+	if err != nil {
+		return err
+	}
+
+	if len(columns) == 0 {
+		return createSyncedEmailsTable(db)
+	}
+	if hasColumn(columns, "message_uid") {
+		return nil
+	}
+	if hasColumn(columns, "pop3_uid") {
+		return migrateSyncedEmailsTable(db)
+	}
+
+	return fmt.Errorf("synced_emails has unsupported columns: %s", strings.Join(columns, ", "))
+}
+
+func syncedEmailsColumns(db *sql.DB) ([]string, error) {
+	rows, err := db.Query("PRAGMA table_info(synced_emails)")
+	if err != nil {
+		return nil, fmt.Errorf("inspect synced_emails schema: %w", err)
+	}
+	defer rows.Close()
+
+	var columns []string
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			dataType   string
+			notNull    int
+			defaultVal any
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultVal, &pk); err != nil {
+			return nil, fmt.Errorf("scan synced_emails schema: %w", err)
+		}
+		columns = append(columns, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate synced_emails schema: %w", err)
+	}
+	return columns, nil
+}
+
+func hasColumn(columns []string, name string) bool {
+	for _, column := range columns {
+		if column == name {
+			return true
+		}
+	}
+	return false
+}
+
+func createSyncedEmailsTable(db *sql.DB) error {
+	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS synced_emails (
 			account_name TEXT,
 			message_uid TEXT,
@@ -25,10 +90,38 @@ func NewDB(path string) (*DB, error) {
 		);
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("ensure table: %w", err)
+		return fmt.Errorf("create synced_emails table: %w", err)
+	}
+	return nil
+}
+
+func migrateSyncedEmailsTable(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin synced_emails migration: %w", err)
+	}
+	defer tx.Rollback()
+
+	statements := []string{
+		"ALTER TABLE synced_emails RENAME TO synced_emails_legacy",
+		`CREATE TABLE synced_emails (
+			account_name TEXT,
+			message_uid TEXT,
+			PRIMARY KEY (account_name, message_uid)
+		)`,
+		"INSERT INTO synced_emails (account_name, message_uid) SELECT account_name, pop3_uid FROM synced_emails_legacy",
+		"DROP TABLE synced_emails_legacy",
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return fmt.Errorf("migrate synced_emails table: %w", err)
+		}
 	}
 
-	return &DB{db}, nil
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit synced_emails migration: %w", err)
+	}
+	return nil
 }
 
 func (db *DB) IsSynced(accountName, uid string) (bool, error) {

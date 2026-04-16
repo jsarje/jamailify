@@ -13,6 +13,9 @@ import (
 	"google.golang.org/api/option"
 )
 
+// Gmail messages.import is authorized with gmail.insert or gmail.modify.
+// There is no separate gmail.import OAuth scope.
+
 type ImportCall interface {
 	Do(opts ...googleapi.CallOption) (*gmail.Message, error)
 }

@@ -19,8 +19,11 @@ func main() {
 	}
 
 	// 2. Parse the credentials into an OAuth2 config
-	// We are requesting the 'gmail.insert' scope to bypass filters, or 'gmail.modify'
-	config, err := google.ConfigFromJSON(b, gmail.GmailInsertScope)
+	// Request the same scopes the app uses at runtime.
+	// Gmail messages.import uses gmail.insert authorization; there is no
+	// separate gmail.import OAuth scope.
+	// A refresh token cannot gain scopes later, so generate it with the full set.
+	config, err := google.ConfigFromJSON(b, gmail.GmailInsertScope, gmail.GmailReadonlyScope)
 	if err != nil {
 		log.Fatalf("Unable to parse client secret file to config: %v", err)
 	}
@@ -34,6 +37,7 @@ func main() {
 	fmt.Printf("Go to the following link in your browser:\n\n%v\n\n", authURL)
 	fmt.Println("=====================================================================")
 	fmt.Println("Log in with the Gmail account you want to push emails TO.")
+	fmt.Println("This token will include Gmail insert and readonly access for import plus duplicate checks.")
 	fmt.Println("Ignore the 'Google hasn't verified this app' warning (click Advanced -> Continue).")
 	fmt.Println("Type the authorization code here (will be in the query string of URL) and press Enter:")
 

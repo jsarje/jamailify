@@ -75,3 +75,50 @@ func TestCrossAccountIsolation(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, synced, "UID should not be synced for a different account")
 }
+
+func TestLegacyPop3UIDSchemaMigration(t *testing.T) {
+	legacyDB, err := NewDB(":memory:")
+	require.NoError(t, err)
+
+	_, err = legacyDB.Exec("DROP TABLE synced_emails")
+	require.NoError(t, err)
+	_, err = legacyDB.Exec(`
+		CREATE TABLE synced_emails (
+			account_name TEXT,
+			pop3_uid TEXT,
+			PRIMARY KEY (account_name, pop3_uid)
+		)
+	`)
+	require.NoError(t, err)
+	_, err = legacyDB.Exec("INSERT INTO synced_emails (account_name, pop3_uid) VALUES (?, ?)", "account1", "uid1")
+	require.NoError(t, err)
+	require.NoError(t, legacyDB.Close())
+
+	migratedDB, err := NewDB(":memory:")
+	require.NoError(t, err)
+	defer migratedDB.Close()
+
+	_, err = migratedDB.Exec("DROP TABLE synced_emails")
+	require.NoError(t, err)
+	_, err = migratedDB.Exec(`
+		CREATE TABLE synced_emails (
+			account_name TEXT,
+			pop3_uid TEXT,
+			PRIMARY KEY (account_name, pop3_uid)
+		)
+	`)
+	require.NoError(t, err)
+	_, err = migratedDB.Exec("INSERT INTO synced_emails (account_name, pop3_uid) VALUES (?, ?)", "account1", "uid1")
+	require.NoError(t, err)
+
+	require.NoError(t, ensureSyncedEmailsSchema(migratedDB.DB))
+
+	synced, err := migratedDB.IsSynced("account1", "uid1")
+	require.NoError(t, err)
+	assert.True(t, synced)
+
+	columns, err := syncedEmailsColumns(migratedDB.DB)
+	require.NoError(t, err)
+	assert.Contains(t, columns, "message_uid")
+	assert.NotContains(t, columns, "pop3_uid")
+}

@@ -63,7 +63,6 @@ type xoauth2ServerScenario struct {
 	greetingCapabilities   []string
 	authenticateParts      []string
 	expectContinuationData bool
-	capabilityResponse     []string
 }
 
 func TestXOAUTH2ClientStart(t *testing.T) {
@@ -99,14 +98,12 @@ func TestAuthenticateXOAUTH2(t *testing.T) {
 			greetingCapabilities:   []string{"IMAP4rev1", "AUTH=XOAUTH2", "SASL-IR"},
 			authenticateParts:      []string{"AUTHENTICATE", "XOAUTH2", base64.StdEncoding.EncodeToString([]byte("user=user@example.com\x01auth=Bearer access-token\x01\x01"))},
 			expectContinuationData: false,
-			capabilityResponse:     []string{"IMAP4rev1", "AUTH=XOAUTH2", "SASL-IR"},
 		},
 		{
 			name:                   "falls back to continuation without SASL-IR",
 			greetingCapabilities:   []string{"IMAP4rev1", "AUTH=XOAUTH2"},
 			authenticateParts:      []string{"AUTHENTICATE", "XOAUTH2"},
 			expectContinuationData: true,
-			capabilityResponse:     []string{"IMAP4rev1", "AUTH=XOAUTH2"},
 		},
 	}
 
@@ -186,27 +183,6 @@ func runAuthenticateXOAUTH2Scenario(t *testing.T, tc xoauth2ServerScenario) {
 			return
 		}
 		if err := rw.Flush(); err != nil {
-			serverErr <- err
-			return
-		}
-
-		capabilityLine, err := rw.ReadString('\n')
-		if err != nil {
-			serverErr <- err
-			return
-		}
-		capabilityLine = strings.TrimSpace(capabilityLine)
-		capabilityParts := strings.SplitN(capabilityLine, " ", 3)
-		if len(capabilityParts) != 2 || capabilityParts[1] != "CAPABILITY" {
-			serverErr <- fmt.Errorf("CAPABILITY command = %q", capabilityLine)
-			return
-		}
-
-		if _, err := rw.WriteString("* CAPABILITY " + strings.Join(tc.capabilityResponse, " ") + "\r\n"); err != nil {
-			serverErr <- err
-			return
-		}
-		if _, err := rw.WriteString(capabilityParts[0] + " OK CAPABILITY completed\r\n"); err != nil {
 			serverErr <- err
 			return
 		}
