@@ -1,0 +1,57 @@
+# Feature Specification: Microsoft Outlook/Hotmail OAuth2 for IMAP
+
+## Overview
+Update the self-hosted Jamailify application to support fetching emails from Microsoft (Hotmail/Outlook.com/Office365) IMAP servers using OAuth2 authentication instead of standard passwords. This requires implementing SASL XOAUTH2 authentication during the IMAP connection phase.
+
+## 1. Required Third-Party Libraries
+* OAuth2 base: `golang.org/x/oauth2`
+* Microsoft endpoints: `golang.org/x/oauth2/microsoft`
+* SASL Authentication: `github.com/emersion/go-sasl`
+* *(Keep existing `github.com/emersion/go-imap`)*
+
+## 2. Configuration Schema Updates
+Update the `config.json` schema to allow an `auth_method` flag for IMAP accounts, and fields for Microsoft OAuth credentials.
+
+The application must parse this updated structure:
+
+    {
+      "poll_interval_minutes": 10,
+      "accounts": [
+        {
+          "name": "My Outlook Account",
+          "protocol": "imap",
+          "imap_server": "outlook.office365.com:993",
+          "imap_user": "me@outlook.com",
+          "auth_method": "oauth2",
+          "ms_client_id": "your-azure-client-id",
+          "ms_client_secret": "your-azure-client-secret",
+          "ms_refresh_token": "M.R3_BAY.c0...",
+          "gmail_refresh_token": "1//0eabc123..."
+        }
+      ]
+    }
+
+* **Validation:** If `auth_method` is `"oauth2"` and `protocol` is `"imap"`, the `ms_*` fields must be populated instead of `imap_pass`. (Default `auth_method` to `"password"` if omitted for backwards compatibility).
+
+## 3. Microsoft OAuth Token Management (`oauth_manager`)
+Create a utility function or struct to handle Microsoft token refreshing.
+* **Endpoint:** Use `microsoft.AzureADEndpoint("common")` from the `golang.org/x/oauth2/microsoft` package to support personal Hotmail/Outlook accounts.
+* **Scopes:** The required scopes for Outlook IMAP are `[]string{"offline_access", "https://outlook.office.com/IMAP.AccessAsUser.All"}`.
+* **Function:** `GetMSAccessToken(clientID, clientSecret, refreshToken string) (string, error)`
+    * This function should initialize an `oauth2.Config`, pass the refresh token to a `TokenSource`, and return a fresh, unexpired `AccessToken` string.
+
+## 4. Refactoring IMAP Client Authentication (`imap_client`)
+Update the `Connect()` method of the `EmailFetcher` IMAP implementation.
+
+* **Check Auth Method:** When configuring the IMAP client, check the account's `auth_method`.
+* **Password Flow:** If `"password"`, use the standard `client.Login(username, password)`.
+* **OAuth2 Flow:** If `"oauth2"`:
+    1.  Call the `oauth_manager` to exchange the `ms_refresh_token` for a fresh `access_token`.
+    2.  Create an XOAUTH2 client using the `emersion/go-sasl` library:
+        `saslClient := sasl.NewXoauth2Client(username, accessToken)`
+    3.  Authenticate using the IMAP client:
+        `err := imapClient.Authenticate(saslClient)`
+
+## 5. Security & Error Handling Constraints
+* **Token Expiry:** Access tokens only last about an hour. The application MUST fetch a fresh access token from the refresh token on *every* sync cycle (or check if the cached token is expired) before calling `Authenticate()`.
+* **Logging:** If IMAP authentication fails, log whether it failed during the standard Login phase or the SASL OAuth phase to make debugging easier.
