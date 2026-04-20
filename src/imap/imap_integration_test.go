@@ -26,7 +26,7 @@ func TestImapIntegration(t *testing.T) {
 		Image:        greenMailImage,
 		ExposedPorts: []string{"3143/tcp", "3025/tcp"},
 		Env: map[string]string{
-			"GREENMAIL_OPTS": "-Dgreenmail.setup.test.all -Dgreenmail.users=testuser:testpass@example.com -Dgreenmail.bindAddress=0.0.0.0 -Dgreenmail.hostname=0.0.0.0",
+			"GREENMAIL_OPTS": "-Dgreenmail.setup.test.all -Dgreenmail.users=testuser:testpass@example.com -Dgreenmail.users.login=email -Dgreenmail.bindAddress=0.0.0.0 -Dgreenmail.hostname=0.0.0.0",
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("3143/tcp"),
@@ -65,10 +65,10 @@ func TestImapIntegration(t *testing.T) {
 
 	// 3. Execution (IMAP)
 	imapClient, err := NewIMAPClient(&config.Account{
-		Server:   fmt.Sprintf("%s:%d", host, imapPort.Int()),
-		User:     "testuser",
-		Pass:     "testpass",
-		NoTls:    true,
+		Server: fmt.Sprintf("%s:%d", host, imapPort.Int()),
+		User:   "testuser@example.com",
+		Pass:   "testpass",
+		NoTls:  true,
 	})
 	require.NoError(t, err)
 

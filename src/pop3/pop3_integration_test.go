@@ -26,7 +26,7 @@ func TestPop3Integration(t *testing.T) {
 		Image:        greenMailImage,
 		ExposedPorts: []string{"3110/tcp", "3025/tcp"},
 		Env: map[string]string{
-			"GREENMAIL_OPTS": "-Dgreenmail.setup.test.all -Dgreenmail.users=testuser:testpass@example.com -Dgreenmail.bindAddress=0.0.0.0 -Dgreenmail.hostname=0.0.0.0",
+			"GREENMAIL_OPTS": "-Dgreenmail.setup.test.all -Dgreenmail.users=testuser:testpass@example.com -Dgreenmail.users.login=email -Dgreenmail.bindAddress=0.0.0.0 -Dgreenmail.hostname=0.0.0.0",
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("3110/tcp"),
@@ -66,7 +66,7 @@ func TestPop3Integration(t *testing.T) {
 	// 3. Execution (POP3)
 	pop3Client, err := NewPOP3Client(&config.Account{
 		Server: fmt.Sprintf("%s:%d", host, pop3Port.Int()),
-		User:   "testuser",
+		User:   "testuser@example.com",
 		Pass:   "testpass",
 		NoTls:  true,
 	})
