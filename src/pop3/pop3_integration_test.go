@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"jamailify/src/config"
 	"log"
-	"net"
 	"net/smtp"
 	"strings"
 	"testing"
@@ -17,12 +16,14 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+const greenMailImage = "greenmail/standalone:2.1.8"
+
 func TestPop3Integration(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Setup
 	req := testcontainers.ContainerRequest{
-		Image:        "greenmail/standalone:latest",
+		Image:        greenMailImage,
 		ExposedPorts: []string{"3110/tcp", "3025/tcp"},
 		Env: map[string]string{
 			"GREENMAIL_OPTS": "-Dgreenmail.setup.test.all -Dgreenmail.users=testuser:testpass@example.com -Dgreenmail.bindAddress=0.0.0.0 -Dgreenmail.hostname=0.0.0.0",
@@ -108,20 +109,10 @@ func sendMail(t *testing.T, addr, to, subject, body string) error {
 	}
 	defer c.Close()
 
-	// Use EHLO/HELO and authenticate with PlainAuth using the test credentials
+	// Seed mail without SMTP auth. GreenMail accepts inbound mail by default, and
+	// the retrieval path under test is POP3 authentication rather than SMTP auth.
 	if err := c.Hello("localhost"); err != nil {
 		return fmt.Errorf("smtp hello failed: %w", err)
-	}
-
-	hostOnly, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		// fallback: use addr as host if SplitHostPort fails
-		hostOnly = addr
-	}
-
-	auth := smtp.PlainAuth("", "testuser", "testpass", hostOnly)
-	if err := c.Auth(auth); err != nil {
-		return fmt.Errorf("smtp auth failed: %w", err)
 	}
 
 	if err := c.Mail("sender@example.com"); err != nil {
