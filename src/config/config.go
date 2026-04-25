@@ -33,7 +33,7 @@ type Config struct {
 	GmailFetchMetadataAfterImport bool   `json:"gmail_fetch_metadata_after_import,omitempty"`
 	// PreserveOriginalTimestamps defaults to true to keep imported mail ordered by
 	// the source message date when a valid Date header is available.
-	PreserveOriginalTimestamps bool      `json:"preserve_original_timestamps,omitempty"`
+	PreserveOriginalTimestamps bool      `json:"preserve_original_timestamps"`
 	Accounts                   []Account `json:"accounts"`
 	// MaxMessagesToCheck limits how many newest messages will be inspected per run.
 	// If zero, a sensible default is used (2000).

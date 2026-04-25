@@ -183,14 +183,14 @@ func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) (*PushResult,
 		}
 	}
 
-	importCall := c.importer.Import("me", message).
+	gmailImportCall := c.importer.Import("me", message).
 		Context(ctx).
 		Fields(googleapi.Field("id"), googleapi.Field("threadId"), googleapi.Field("labelIds"), googleapi.Field("internalDate"))
 	if useReceivedTime {
-		importCall = importCall.InternalDateSource("receivedTime")
+		gmailImportCall = gmailImportCall.InternalDateSource("receivedTime")
 	}
 
-	imported, err := importCall.Do()
+	imported, err := gmailImportCall.Do()
 	if err != nil {
 		return nil, fmt.Errorf("push email: %w", err)
 	}
