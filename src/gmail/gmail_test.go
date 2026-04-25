@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"testing"
 	"time"
@@ -121,13 +122,21 @@ func (m *MockMessageLister) List(userId string) ListCall {
 	return args.Get(0).(ListCall)
 }
 
+func rawEmailForTest(dateHeader string) []byte {
+	headers := ""
+	if dateHeader != "" {
+		headers = fmt.Sprintf("Date: %s\r\n", dateHeader)
+	}
+	return []byte(headers + "Message-ID: <abc@example.com>\r\nFrom: from@example.com\r\nTo: to@example.com\r\nSubject: Test\r\n\r\nTest Body")
+}
+
 func TestPushEmail_UsesReceivedTimeWhenPreservationDisabled(t *testing.T) {
 	mockImporter := new(MockMessageImporter)
 	mockImportCall := new(MockImportCall)
 
 	client := &Client{importer: mockImporter, preserveOriginalTimestamps: false}
 
-	rawEmail := []byte("Date: Mon, 02 Jan 2006 15:04:05 -0700\r\nMessage-ID: <abc@example.com>\r\nFrom: from@example.com\r\nTo: to@example.com\r\nSubject: Test\r\n\r\nTest Body")
+	rawEmail := rawEmailForTest("Mon, 02 Jan 2006 15:04:05 -0700")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	// Set up the importer expectation.
@@ -164,7 +173,7 @@ func TestPushEmail_FetchesMetadataAfterImportWhenEnabled(t *testing.T) {
 		preserveOriginalTimestamps: false,
 	}
 
-	rawEmail := []byte("Date: Mon, 02 Jan 2006 15:04:05 -0700\r\nMessage-ID: <abc@example.com>\r\nFrom: from@example.com\r\nTo: to@example.com\r\nSubject: Test\r\n\r\nTest Body")
+	rawEmail := rawEmailForTest("Mon, 02 Jan 2006 15:04:05 -0700")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
@@ -199,7 +208,7 @@ func TestPushEmail_PreservesOriginalTimestampWhenEnabled(t *testing.T) {
 	client := &Client{importer: mockImporter, preserveOriginalTimestamps: true}
 
 	rawDate := time.Date(2024, time.March, 14, 15, 9, 26, 0, time.FixedZone("UTC-5", -5*60*60))
-	rawEmail := []byte("Date: " + rawDate.Format(time.RFC1123Z) + "\r\nMessage-ID: <abc@example.com>\r\nFrom: from@example.com\r\nTo: to@example.com\r\nSubject: Test\r\n\r\nTest Body")
+	rawEmail := rawEmailForTest(rawDate.Format(time.RFC1123Z))
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
@@ -223,7 +232,7 @@ func TestPushEmail_FallsBackToReceivedTimeWhenDateInvalid(t *testing.T) {
 
 	client := &Client{importer: mockImporter, preserveOriginalTimestamps: true}
 
-	rawEmail := []byte("Date: not-a-date\r\nMessage-ID: <abc@example.com>\r\nFrom: from@example.com\r\nTo: to@example.com\r\nSubject: Test\r\n\r\nTest Body")
+	rawEmail := rawEmailForTest("not-a-date")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	var logOutput bytes.Buffer
@@ -250,4 +259,46 @@ func TestPushEmail_FallsBackToReceivedTimeWhenDateInvalid(t *testing.T) {
 	assert.Contains(t, logOutput.String(), "preserve_original_timestamps enabled but falling back to import time")
 	mockImporter.AssertExpectations(t)
 	mockImportCall.AssertExpectations(t)
+}
+
+func TestParseInternalDate(t *testing.T) {
+	validDate := time.Date(2024, time.March, 14, 15, 9, 26, 0, time.FixedZone("UTC-5", -5*60*60))
+
+	testCases := []struct {
+		name          string
+		rawEmail      []byte
+		wantDate      int64
+		expectedError string
+	}{
+		{
+			name:     "valid RFC 5322 date",
+			rawEmail: rawEmailForTest(validDate.Format(time.RFC1123Z)),
+			wantDate: validDate.UnixMilli(),
+		},
+		{
+			name:          "missing Date header",
+			rawEmail:      rawEmailForTest(""),
+			expectedError: "missing Date header",
+		},
+		{
+			name:          "malformed Date header",
+			rawEmail:      rawEmailForTest("not-a-date"),
+			expectedError: "parse Date header",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseInternalDate(tc.rawEmail)
+
+			if tc.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedError)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.EqualValues(t, tc.wantDate, got)
+		})
+	}
 }
