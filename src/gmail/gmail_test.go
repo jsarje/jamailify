@@ -122,7 +122,7 @@ func (m *MockMessageLister) List(userId string) ListCall {
 	return args.Get(0).(ListCall)
 }
 
-func rawEmailForTest(dateHeader string) []byte {
+func buildTestEmail(dateHeader string) []byte {
 	headers := ""
 	if dateHeader != "" {
 		headers = fmt.Sprintf("Date: %s\r\n", dateHeader)
@@ -136,7 +136,7 @@ func TestPushEmail_UsesReceivedTimeWhenPreservationDisabled(t *testing.T) {
 
 	client := &Client{importer: mockImporter, preserveOriginalTimestamps: false}
 
-	rawEmail := rawEmailForTest("Mon, 02 Jan 2006 15:04:05 -0700")
+	rawEmail := buildTestEmail("Mon, 02 Jan 2006 15:04:05 -0700")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	// Set up the importer expectation.
@@ -173,7 +173,7 @@ func TestPushEmail_FetchesMetadataAfterImportWhenEnabled(t *testing.T) {
 		preserveOriginalTimestamps: false,
 	}
 
-	rawEmail := rawEmailForTest("Mon, 02 Jan 2006 15:04:05 -0700")
+	rawEmail := buildTestEmail("Mon, 02 Jan 2006 15:04:05 -0700")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
@@ -208,7 +208,7 @@ func TestPushEmail_PreservesOriginalTimestampWhenEnabled(t *testing.T) {
 	client := &Client{importer: mockImporter, preserveOriginalTimestamps: true}
 
 	rawDate := time.Date(2024, time.March, 14, 15, 9, 26, 0, time.FixedZone("UTC-5", -5*60*60))
-	rawEmail := rawEmailForTest(rawDate.Format(time.RFC1123Z))
+	rawEmail := buildTestEmail(rawDate.Format(time.RFC1123Z))
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
@@ -232,7 +232,7 @@ func TestPushEmail_FallsBackToReceivedTimeWhenDateInvalid(t *testing.T) {
 
 	client := &Client{importer: mockImporter, preserveOriginalTimestamps: true}
 
-	rawEmail := rawEmailForTest("not-a-date")
+	rawEmail := buildTestEmail("not-a-date")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	var logOutput bytes.Buffer
@@ -272,17 +272,17 @@ func TestParseInternalDate(t *testing.T) {
 	}{
 		{
 			name:     "valid RFC 5322 date",
-			rawEmail: rawEmailForTest(validDate.Format(time.RFC1123Z)),
+			rawEmail: buildTestEmail(validDate.Format(time.RFC1123Z)),
 			wantDate: validDate.UnixMilli(),
 		},
 		{
 			name:          "missing Date header",
-			rawEmail:      rawEmailForTest(""),
+			rawEmail:      buildTestEmail(""),
 			expectedError: "missing Date header",
 		},
 		{
 			name:          "malformed Date header",
-			rawEmail:      rawEmailForTest("not-a-date"),
+			rawEmail:      buildTestEmail("not-a-date"),
 			expectedError: "parse Date header",
 		},
 	}
