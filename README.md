@@ -104,3 +104,54 @@ Copy the resulting refresh tokens directly into your `config.json` file.
 ## 🧑‍🤝‍🧑 Contributing
 
 Information on building the project, running tests (including containerized integration tests), understanding the architecture (like the `Fetcher` interface), and contributing can be found in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Getting Started with Docker Compose
+
+This project is container-friendly and can be run directly from the GitHub Container Registry (GHCR). The image is published at `ghcr.io/jsarje/jamailify`. The instructions below cover both public-image usage and the small extra steps needed if the package is private.
+
+- **Prerequisites**: Docker (Docker Desktop) and `docker compose` installed.
+- **Runtime files**: Provide a `config.json` at `./config/config.json` and a writable `./data` directory; the service expects `/app/config/config.json` and `/app/data/sync_state.db` inside the container.
+
+### Example `docker-compose.yml`
+
+Create `docker-compose.yml` next to your project with the following minimal example. Adjust the image tag to a specific release if desired (avoid `:latest` in production).
+
+```yaml
+version: "3.8"
+services:
+	jamailify:
+		image: ghcr.io/jsarje/jamailify:latest
+		restart: unless-stopped
+		volumes:
+			- ./config:/app/config
+			- ./data:/app/data
+		environment:
+			- TZ=UTC			
+```
+
+### Run and verify
+
+Pull and start the service:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Watch logs to verify startup and configuration loading:
+
+```bash
+docker compose logs -f jamailify
+```
+
+Stop and remove containers when finished:
+
+```bash
+docker compose down
+```
+
+### Notes
+
+- Ensure `./config/config.json` contains the app configuration (see the example earlier in this README). The container reads `/app/config/config.json`.
+- If you need a pinned image version, use `ghcr.io/jsarje/jamailify:<tag>` instead of `:latest`.
+
