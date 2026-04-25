@@ -30,6 +30,7 @@ type GmailOperations interface {
 
 func RunSingleSync(ctx context.Context, account config.Account, cfg *config.Config, db DBOperations, emailFetcher fetcher.EmailFetcher, gmailClient GmailOperations) {
 	log.Printf("[%s] Starting sync cycle", account.Name)
+	log.Printf("[%s] preserve_original_timestamps=%t", account.Name, cfg.PreserveOriginalTimestamps)
 	// We'll only sync messages from the last 7 days. Iterate newest->oldest
 	// determine effective cutoff and maxToCheck from config (defaults if zero)
 	windowDays := cfg.SyncWindowDays
@@ -191,7 +192,7 @@ func main() {
 				}
 				defer emailFetcher.Close()
 
-				gmailClient, err := gmail.NewClient(ctx, cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken, cfg.GmailFetchMetadataAfterImport)
+				gmailClient, err := gmail.NewClient(ctx, cfg.GoogleClientID, cfg.GoogleClientSecret, account.GmailRefreshToken, cfg.GmailFetchMetadataAfterImport, cfg.PreserveOriginalTimestamps)
 				if err != nil {
 					log.Printf("[%s] ERROR: Failed to create Gmail client: %v", account.Name, err)
 					return

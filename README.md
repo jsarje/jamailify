@@ -26,6 +26,7 @@ Here is an example configuration file:
 	"google_client_id": "YOUR_GMAIL_CLIENT_ID",
 	"google_client_secret": "YOUR_GMAIL_CLIENT_SECRET",
 	"gmail_fetch_metadata_after_import": true,
+	"preserve_original_timestamps": true,
 	"max_messages_to_check": 2000,
 	"sync_window_days": 7,
 	"accounts": [
@@ -57,6 +58,7 @@ Here is an example configuration file:
 - `poll_interval_minutes` (int) - The pause between checking accounts.
 - `google_client_id` & `google_client_secret` - The Google Cloud app credentials used to authenticate to Gmail.
 - `gmail_fetch_metadata_after_import` (bool, optional) - Whether to fetch and log the created Gmail thread/message ID metadata after successfully pushing an email.
+- `preserve_original_timestamps` (bool, default: true) - Whether imported messages keep the source email `Date` header as Gmail's internal timestamp. When disabled, Gmail uses the import time instead.
 - `max_messages_to_check` (int, default: 2000) - Maximum number of newest messages to inspect per sync stream. This prevents scanning very large mailboxes on each poll.
 - `sync_window_days` (int, default: 7) - Number of days to look back for messages to sync. Only messages with a `Date` header within this window are considered.
 

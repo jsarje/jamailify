@@ -1,9 +1,12 @@
 package gmail
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log"
+	"net/mail"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -122,10 +125,11 @@ func (l *listCallAdapter) Do(opts ...googleapi.CallOption) (*gmail.ListMessagesR
 }
 
 type Client struct {
-	importer                 MessageImporter
-	getter                   MessageGetter
-	lister                   MessageLister
-	fetchMetadataAfterImport bool
+	importer                   MessageImporter
+	getter                     MessageGetter
+	lister                     MessageLister
+	fetchMetadataAfterImport   bool
+	preserveOriginalTimestamps bool
 }
 
 type PushResult struct {
@@ -137,7 +141,7 @@ type PushResult struct {
 
 // NewClient creates a Gmail client using the provided OAuth2 credentials.
 // The ctx provided will be used for creating the underlying Gmail service.
-func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string, fetchMetadataAfterImport bool) (*Client, error) {
+func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string, fetchMetadataAfterImport, preserveOriginalTimestamps bool) (*Client, error) {
 	cfg := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
@@ -156,23 +160,37 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string,
 
 	adapter := &gmailAPIAdapter{service: srv}
 	return &Client{
-		importer:                 adapter,
-		getter:                   adapter,
-		lister:                   adapter,
-		fetchMetadataAfterImport: fetchMetadataAfterImport,
+		importer:                   adapter,
+		getter:                     adapter,
+		lister:                     adapter,
+		fetchMetadataAfterImport:   fetchMetadataAfterImport,
+		preserveOriginalTimestamps: preserveOriginalTimestamps,
 	}, nil
 }
 
 // PushEmail pushes a raw RFC2822 email to the authenticated user's mailbox.
-// The import uses Gmail's received time so newly imported messages sort near
-// the top instead of being ordered by the original Date header.
 func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) (*PushResult, error) {
 	message := &gmail.Message{Raw: base64.RawURLEncoding.EncodeToString(rawRFC2822)}
-	imported, err := c.importer.Import("me", message).
+	useReceivedTime := !c.preserveOriginalTimestamps
+
+	if c.preserveOriginalTimestamps {
+		internalDate, err := parseInternalDate(rawRFC2822)
+		if err != nil {
+			log.Printf("WARN: preserve_original_timestamps enabled but falling back to import time: %v", err)
+			useReceivedTime = true
+		} else {
+			message.InternalDate = internalDate
+		}
+	}
+
+	importCall := c.importer.Import("me", message).
 		Context(ctx).
-		Fields(googleapi.Field("id"), googleapi.Field("threadId"), googleapi.Field("labelIds"), googleapi.Field("internalDate")).
-		InternalDateSource("receivedTime").
-		Do()
+		Fields(googleapi.Field("id"), googleapi.Field("threadId"), googleapi.Field("labelIds"), googleapi.Field("internalDate"))
+	if useReceivedTime {
+		importCall = importCall.InternalDateSource("receivedTime")
+	}
+
+	imported, err := importCall.Do()
 	if err != nil {
 		return nil, fmt.Errorf("push email: %w", err)
 	}
@@ -197,6 +215,25 @@ func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) (*PushResult,
 		LabelIDs:     append([]string(nil), resolved.LabelIds...),
 		InternalDate: resolved.InternalDate,
 	}, nil
+}
+
+func parseInternalDate(rawRFC2822 []byte) (int64, error) {
+	message, err := mail.ReadMessage(bytes.NewReader(rawRFC2822))
+	if err != nil {
+		return 0, fmt.Errorf("read message headers: %w", err)
+	}
+
+	dateHeader := message.Header.Get("Date")
+	if dateHeader == "" {
+		return 0, fmt.Errorf("missing Date header")
+	}
+
+	parsedDate, err := mail.ParseDate(dateHeader)
+	if err != nil {
+		return 0, fmt.Errorf("parse Date header %q: %w", dateHeader, err)
+	}
+
+	return parsedDate.UnixMilli(), nil
 }
 
 func (c *Client) MessageIdExists(ctx context.Context, messageId string) (bool, error) {

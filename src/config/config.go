@@ -31,6 +31,7 @@ type Config struct {
 	GoogleClientID                string    `json:"google_client_id"`
 	GoogleClientSecret            string    `json:"google_client_secret"`
 	GmailFetchMetadataAfterImport bool      `json:"gmail_fetch_metadata_after_import,omitempty"`
+	PreserveOriginalTimestamps    bool      `json:"preserve_original_timestamps,omitempty"`
 	Accounts                      []Account `json:"accounts"`
 	// MaxMessagesToCheck limits how many newest messages will be inspected per run.
 	// If zero, a sensible default is used (2000).
@@ -46,7 +47,9 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
-	var config Config
+	config := Config{
+		PreserveOriginalTimestamps: true,
+	}
 	err = json.Unmarshal(configFile, &config)
 	if err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
