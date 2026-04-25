@@ -27,11 +27,14 @@ type Account struct {
 }
 
 type Config struct {
-	PollIntervalMinutes           int       `json:"poll_interval_minutes"`
-	GoogleClientID                string    `json:"google_client_id"`
-	GoogleClientSecret            string    `json:"google_client_secret"`
-	GmailFetchMetadataAfterImport bool      `json:"gmail_fetch_metadata_after_import,omitempty"`
-	Accounts                      []Account `json:"accounts"`
+	PollIntervalMinutes           int    `json:"poll_interval_minutes"`
+	GoogleClientID                string `json:"google_client_id"`
+	GoogleClientSecret            string `json:"google_client_secret"`
+	GmailFetchMetadataAfterImport bool   `json:"gmail_fetch_metadata_after_import,omitempty"`
+	// PreserveOriginalTimestamps defaults to true to keep imported mail ordered by
+	// the source message date when a valid Date header is available.
+	PreserveOriginalTimestamps bool      `json:"preserve_original_timestamps"`
+	Accounts                   []Account `json:"accounts"`
 	// MaxMessagesToCheck limits how many newest messages will be inspected per run.
 	// If zero, a sensible default is used (2000).
 	MaxMessagesToCheck int `json:"max_messages_to_check"`
@@ -46,7 +49,9 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
-	var config Config
+	config := Config{
+		PreserveOriginalTimestamps: true,
+	}
 	err = json.Unmarshal(configFile, &config)
 	if err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)

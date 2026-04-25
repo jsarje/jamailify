@@ -48,6 +48,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "google_id", config.GoogleClientID)
 				assert.Equal(t, "google_secret", config.GoogleClientSecret)
 				assert.False(t, config.GmailFetchMetadataAfterImport)
+				assert.True(t, config.PreserveOriginalTimestamps)
 				require.Len(t, config.Accounts, 1)
 				assert.Equal(t, "account1", config.Accounts[0].Name)
 				assert.Equal(t, "pop3", config.Accounts[0].Protocol)
@@ -167,6 +168,7 @@ func TestLoadConfig(t *testing.T) {
 				require.Len(t, config.Accounts, 1)
 				acc := config.Accounts[0]
 				assert.False(t, config.GmailFetchMetadataAfterImport)
+				assert.True(t, config.PreserveOriginalTimestamps)
 				assert.Equal(t, "oauth2", acc.AuthMethod)
 				assert.Equal(t, "azure-client-id", acc.MSClientID)
 				assert.Equal(t, "azure-client-secret", acc.MSClientSecret)
@@ -204,6 +206,39 @@ func TestLoadConfig(t *testing.T) {
 			expectError: false,
 			check: func(t *testing.T, config *Config) {
 				assert.True(t, config.GmailFetchMetadataAfterImport)
+				assert.True(t, config.PreserveOriginalTimestamps)
+			},
+		},
+		{
+			name: "Preserve original timestamps disabled",
+			path: func(t *testing.T) string {
+				content := `{
+					"poll_interval_minutes": 15,
+					"google_client_id": "google_id",
+					"google_client_secret": "google_secret",
+					"preserve_original_timestamps": false,
+					"accounts": [
+						{
+							"name": "account1",
+							"protocol": "pop3",
+							"server": "pop.example.com:995",
+							"user": "user1",
+							"pass": "pass1",
+							"gmail_refresh_token": "token1"
+						}
+					]
+				}`
+				f, err := os.CreateTemp("", "preserve_timestamps_disabled_config.json")
+				require.NoError(t, err)
+				t.Cleanup(func() { os.Remove(f.Name()) })
+				_, err = f.WriteString(content)
+				require.NoError(t, err)
+				f.Close()
+				return f.Name()
+			},
+			expectError: false,
+			check: func(t *testing.T, config *Config) {
+				assert.False(t, config.PreserveOriginalTimestamps)
 			},
 		},
 		{

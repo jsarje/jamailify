@@ -1,9 +1,13 @@
 package gmail
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
+	"log"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -118,18 +122,26 @@ func (m *MockMessageLister) List(userId string) ListCall {
 	return args.Get(0).(ListCall)
 }
 
-func TestPushEmail_DefaultDoesNotFetchMetadataAfterImport(t *testing.T) {
+func buildTestEmail(dateHeader string) []byte {
+	headers := ""
+	if dateHeader != "" {
+		headers = fmt.Sprintf("Date: %s\r\n", dateHeader)
+	}
+	return []byte(headers + "Message-ID: <abc@example.com>\r\nFrom: from@example.com\r\nTo: to@example.com\r\nSubject: Test\r\n\r\nTest Body")
+}
+
+func TestPushEmail_UsesReceivedTimeWhenPreservationDisabled(t *testing.T) {
 	mockImporter := new(MockMessageImporter)
 	mockImportCall := new(MockImportCall)
 
-	client := &Client{importer: mockImporter}
+	client := &Client{importer: mockImporter, preserveOriginalTimestamps: false}
 
-	rawEmail := []byte("Message-ID: <abc@example.com>\nFrom: from@example.com\nTo: to@example.com\nSubject: Test\n\nTest Body")
+	rawEmail := buildTestEmail("Mon, 02 Jan 2006 15:04:05 -0700")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	// Set up the importer expectation.
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
-		return msg.Raw == expectedEncodedEmail
+		return msg.Raw == expectedEncodedEmail && msg.InternalDate == 0
 	})).Return(mockImportCall)
 	mockImportCall.On("Context", mock.Anything).Return(mockImportCall)
 	mockImportCall.On("Fields").Return(mockImportCall)
@@ -154,13 +166,18 @@ func TestPushEmail_FetchesMetadataAfterImportWhenEnabled(t *testing.T) {
 	mockGetter := new(MockMessageGetter)
 	mockGetCall := new(MockGetCall)
 
-	client := &Client{importer: mockImporter, getter: mockGetter, fetchMetadataAfterImport: true}
+	client := &Client{
+		importer:                   mockImporter,
+		getter:                     mockGetter,
+		fetchMetadataAfterImport:   true,
+		preserveOriginalTimestamps: false,
+	}
 
-	rawEmail := []byte("Message-ID: <abc@example.com>\nFrom: from@example.com\nTo: to@example.com\nSubject: Test\n\nTest Body")
+	rawEmail := buildTestEmail("Mon, 02 Jan 2006 15:04:05 -0700")
 	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
 
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
-		return msg.Raw == expectedEncodedEmail
+		return msg.Raw == expectedEncodedEmail && msg.InternalDate == 0
 	})).Return(mockImportCall)
 	mockImportCall.On("Context", mock.Anything).Return(mockImportCall)
 	mockImportCall.On("Fields").Return(mockImportCall)
@@ -182,4 +199,106 @@ func TestPushEmail_FetchesMetadataAfterImportWhenEnabled(t *testing.T) {
 	mockImportCall.AssertExpectations(t)
 	mockGetter.AssertExpectations(t)
 	mockGetCall.AssertExpectations(t)
+}
+
+func TestPushEmail_PreservesOriginalTimestampWhenEnabled(t *testing.T) {
+	mockImporter := new(MockMessageImporter)
+	mockImportCall := new(MockImportCall)
+
+	client := &Client{importer: mockImporter, preserveOriginalTimestamps: true}
+
+	rawDate := time.Date(2024, time.March, 14, 15, 9, 26, 0, time.FixedZone("UTC-5", -5*60*60))
+	rawEmail := buildTestEmail(rawDate.Format(time.RFC1123Z))
+	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
+
+	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
+		return msg.Raw == expectedEncodedEmail && msg.InternalDate == rawDate.UnixMilli()
+	})).Return(mockImportCall)
+	mockImportCall.On("Context", mock.Anything).Return(mockImportCall)
+	mockImportCall.On("Fields").Return(mockImportCall)
+	mockImportCall.On("Do").Return(&gmail.Message{Id: "gmail-message-id", InternalDate: rawDate.UnixMilli()}, nil)
+
+	result, err := client.PushEmail(context.Background(), rawEmail)
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, rawDate.UnixMilli(), result.InternalDate)
+	mockImporter.AssertExpectations(t)
+	mockImportCall.AssertExpectations(t)
+}
+
+func TestPushEmail_FallsBackToReceivedTimeWhenDateInvalid(t *testing.T) {
+	mockImporter := new(MockMessageImporter)
+	mockImportCall := new(MockImportCall)
+
+	client := &Client{importer: mockImporter, preserveOriginalTimestamps: true}
+
+	rawEmail := buildTestEmail("not-a-date")
+	expectedEncodedEmail := base64.RawURLEncoding.EncodeToString(rawEmail)
+
+	var logOutput bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&logOutput)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+
+	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
+		return msg.Raw == expectedEncodedEmail && msg.InternalDate == 0
+	})).Return(mockImportCall)
+	mockImportCall.On("Context", mock.Anything).Return(mockImportCall)
+	mockImportCall.On("Fields").Return(mockImportCall)
+	mockImportCall.On("InternalDateSource", "receivedTime").Return(mockImportCall)
+	mockImportCall.On("Do").Return(&gmail.Message{Id: "gmail-message-id"}, nil)
+
+	_, err := client.PushEmail(context.Background(), rawEmail)
+
+	assert.NoError(t, err)
+	assert.Contains(t, logOutput.String(), "preserve_original_timestamps enabled but falling back to import time")
+	mockImporter.AssertExpectations(t)
+	mockImportCall.AssertExpectations(t)
+}
+
+func TestParseInternalDate(t *testing.T) {
+	validDate := time.Date(2024, time.March, 14, 15, 9, 26, 0, time.FixedZone("UTC-5", -5*60*60))
+
+	testCases := []struct {
+		name          string
+		rawEmail      []byte
+		wantDate      int64
+		expectedError string
+	}{
+		{
+			name:     "valid RFC 5322 date",
+			rawEmail: buildTestEmail(validDate.Format(time.RFC1123Z)),
+			wantDate: validDate.UnixMilli(),
+		},
+		{
+			name:          "missing Date header",
+			rawEmail:      buildTestEmail(""),
+			expectedError: "missing Date header",
+		},
+		{
+			name:          "malformed Date header",
+			rawEmail:      buildTestEmail("not-a-date"),
+			expectedError: "parse Date header",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseInternalDate(tc.rawEmail)
+
+			if tc.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedError)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.EqualValues(t, tc.wantDate, got)
+		})
+	}
 }

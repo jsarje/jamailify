@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"jamailify/src/config"
 	"jamailify/src/gmail"
+	"log"
 	"testing"
 	"time"
 
@@ -235,4 +237,28 @@ func TestRunSingleSync_MessageIdDeduplication(t *testing.T) {
 	assert.Equal(t, "email2", string(gmailClient.pushedEmails[0]))
 	assert.True(t, db.syncedUIDs["uid1"])
 	assert.True(t, db.syncedUIDs["uid2"])
+}
+
+func TestRunSingleSync_LogsTimestampPreservationSetting(t *testing.T) {
+	account := config.Account{Name: "test-account"}
+	cfg := &config.Config{PreserveOriginalTimestamps: true}
+	db := &mockDB{syncedUIDs: make(map[string]bool)}
+	emailFetcher := &mockEmailFetcher{
+		uids: []string{},
+	}
+	gmailClient := &mockGmailClient{}
+
+	var logOutput bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&logOutput)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+
+	RunSingleSync(context.Background(), account, cfg, db, emailFetcher, gmailClient)
+
+	assert.Contains(t, logOutput.String(), "[test-account] preserve_original_timestamps=true")
 }
