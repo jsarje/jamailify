@@ -45,12 +45,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute Docker image tags
+        id: compute_tags
+        run: |
+          TAG_REF=${GITHUB_REF#refs/tags/}
+          IFS='.' read -r P1 P2 _ <<< "$TAG_REF"
+          MAJOR="$P1"
+          if [ -n "$P2" ]; then
+            MAJOR_MINOR="$P1.$P2"
+          else
+            MAJOR_MINOR="$P1"
+          fi
+          echo "full=$TAG_REF" >> $GITHUB_OUTPUT
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "major_minor=$MAJOR_MINOR" >> $GITHUB_OUTPUT
+          echo "latest=latest" >> $GITHUB_OUTPUT
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ github.ref_name }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.compute_tags.outputs.full }}
+            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.compute_tags.outputs.major }}
+            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.compute_tags.outputs.major_minor }}
+            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
 
 
       - name: Create GitHub Release
