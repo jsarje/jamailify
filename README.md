@@ -112,6 +112,7 @@ Information on building the project, running tests (including containerized inte
 This project is container-friendly and can be run directly from the GitHub Container Registry (GHCR). The image is published at `ghcr.io/jsarje/jamailify`. The instructions below cover both public-image usage and the small extra steps needed if the package is private.
 
 - **Prerequisites**: Docker (Docker Desktop) and `docker compose` installed.
+- **Supported container platforms**: Published images target both `linux/amd64` and `linux/arm64`, including Raspberry Pi systems running 64-bit Raspberry Pi OS.
 - **Runtime files**: Provide a `config.json` at `./config/config.json` and a writable `./data` directory; the service expects `/app/config/config.json` and `/app/data/sync_state.db` inside the container.
 
 ### Example `docker-compose.yml`
@@ -156,4 +157,5 @@ docker compose down
 
 - Ensure `./config/config.json` contains the app configuration (see the example earlier in this README). The container reads `/app/config/config.json`.
 - If you need a pinned image version, use `ghcr.io/jsarje/jamailify:<tag>` instead of `:latest`.
+- If a Raspberry Pi pull fails with `no matching manifest for linux/arm64/v8`, the currently published tag was built before multi-architecture publishing was enabled. Push a new release tag so GitHub Actions republishes that image with an `arm64` manifest.
 
