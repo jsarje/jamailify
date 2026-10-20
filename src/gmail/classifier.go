@@ -104,9 +104,8 @@ func classifyEmail(raw []byte) string {
 
 	fromDomain := ""
 	if from, err := mail.ParseAddress(message.Header.Get("From")); err == nil {
-		parts := strings.Split(from.Address, "@")
-		if len(parts) == 2 {
-			fromDomain = strings.ToLower(parts[1])
+		if separator := strings.LastIndex(from.Address, "@"); separator >= 0 {
+			fromDomain = strings.ToLower(from.Address[separator+1:])
 		}
 	}
 
@@ -115,7 +114,13 @@ func classifyEmail(raw []byte) string {
 		contentType = "text/plain"
 	}
 	used := 0
-	body := readClassifierBody(message.Body, contentType, message.Header.Get("Content-Transfer-Encoding"), &used, 0)
+	body := readClassifierBody(
+		io.LimitReader(message.Body, maxClassifierBody),
+		contentType,
+		message.Header.Get("Content-Transfer-Encoding"),
+		&used,
+		0,
+	)
 	text := strings.ToLower(strings.Join([]string{subject, body}, "\n"))
 
 	if containsAny(text, socialPhrases) {
