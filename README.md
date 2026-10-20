@@ -11,7 +11,7 @@ A small, self-hosted "Gmailify" service written in Go: it polls POP3 and IMAP ac
 - **Modern Authentication**: Supports standard password auth or modern Microsoft OAuth2 (Outlook/Hotmail) for IMAP accounts.
 - **Robust Deduplication**: Persists processed UIDs in SQLite and actively queries the Gmail `rfc822msgid:` API to avoid duplicate delivery, even if the local database is lost.
 - **Load Reduction**: Uses header-first fetching strategies to determine message age, minimizing bandwidth usage for large mailboxes. 
-- **Gmail Classification**: Imports raw RFC 2822 messages using Gmail's `Users.Messages.Import` API, which performs standard delivery scanning and classification. Gmail determines the message categories; Jamailify does not force a category label.
+- **Heuristic Categories**: Assigns each imported message to Primary, Promotions, Social, or Updates using sender, header, subject, and a bounded body snippet. These simple rules are approximate and may misclassify messages.
 - **Container-Friendly**: Designed for easy deployment via Docker and simple `config.json` files.
 
 ## 🛠️ Configuration
