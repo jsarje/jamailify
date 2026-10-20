@@ -141,8 +141,7 @@ func TestPushEmail_UsesReceivedTimeWhenPreservationDisabled(t *testing.T) {
 
 	// Set up the importer expectation.
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
-		return msg.Raw == expectedEncodedEmail && msg.InternalDate == 0 &&
-			len(msg.LabelIds) == 1 && msg.LabelIds[0] == "CATEGORY_PERSONAL"
+		return msg.Raw == expectedEncodedEmail && msg.InternalDate == 0 && len(msg.LabelIds) == 0
 	})).Return(mockImportCall)
 	mockImportCall.On("Context", mock.Anything).Return(mockImportCall)
 	mockImportCall.On("Fields").Return(mockImportCall)
