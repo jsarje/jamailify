@@ -29,6 +29,11 @@ func TestClassifyEmail(t *testing.T) {
 			want: categorySocial,
 		},
 		{
+			name: "social sender domain takes precedence over unsubscribe header",
+			raw:  "From: updates@linkedin.com\r\nSubject: Your network\r\nList-Unsubscribe: <mailto:unsubscribe@example.com>\r\n\r\nSee what's new.",
+			want: categorySocial,
+		},
+		{
 			name: "classifies mailing list promotion",
 			raw:  "From: shop@example.com\r\nSubject: A note\r\nList-Unsubscribe: <mailto:unsubscribe@example.com>\r\n\r\nHello",
 			want: categoryPromotions,
@@ -44,6 +49,13 @@ func TestClassifyEmail(t *testing.T) {
 				"--msg\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nYour order shipped. Tracking number: 123.\r\n" +
 				"--msg\r\nContent-Type: text/html\r\n\r\n<p>Your order shipped</p>\r\n--msg--\r\n",
 			want: categoryUpdates,
+		},
+		{
+			name: "ignores text attachment contents",
+			raw: "From: person@example.com\r\nSubject: Hello\r\nContent-Type: multipart/mixed; boundary=msg\r\n\r\n" +
+				"--msg\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHi there.\r\n" +
+				"--msg\r\nContent-Type: text/plain; name=notes.txt\r\nContent-Disposition: attachment; filename=notes.txt\r\n\r\nInvoice\r\n--msg--\r\n",
+			want: categoryPersonal,
 		},
 		{
 			name: "social notification takes precedence over promotional signals",

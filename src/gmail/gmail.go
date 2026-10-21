@@ -172,7 +172,7 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string,
 func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) (*PushResult, error) {
 	message := &gmail.Message{
 		Raw:      base64.RawURLEncoding.EncodeToString(rawRFC2822),
-		LabelIds: []string{classifyEmail(rawRFC2822)},
+		LabelIds: []string{"INBOX", classifyEmail(rawRFC2822)},
 	}
 	useReceivedTime := !c.preserveOriginalTimestamps
 

@@ -142,7 +142,7 @@ func TestPushEmail_UsesReceivedTimeWhenPreservationDisabled(t *testing.T) {
 	// Set up the importer expectation.
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
 		return msg.Raw == expectedEncodedEmail && msg.InternalDate == 0 &&
-			len(msg.LabelIds) == 1 && msg.LabelIds[0] == categoryPersonal
+			len(msg.LabelIds) == 2 && msg.LabelIds[0] == "INBOX" && msg.LabelIds[1] == categoryPersonal
 	})).Return(mockImportCall)
 	mockImportCall.On("Context", mock.Anything).Return(mockImportCall)
 	mockImportCall.On("Fields").Return(mockImportCall)
@@ -168,7 +168,7 @@ func TestPushEmail_AppliesHeuristicCategory(t *testing.T) {
 
 	rawEmail := []byte("From: shop@example.com\r\nSubject: Special offer\r\n\r\nLimited time deal")
 	mockImporter.On("Import", "me", mock.MatchedBy(func(msg *gmail.Message) bool {
-		return msg.LabelIds != nil && len(msg.LabelIds) == 1 && msg.LabelIds[0] == categoryPromotions
+		return msg.LabelIds != nil && len(msg.LabelIds) == 2 && msg.LabelIds[0] == "INBOX" && msg.LabelIds[1] == categoryPromotions
 	})).Return(mockImportCall)
 	mockImportCall.On("Context", mock.Anything).Return(mockImportCall)
 	mockImportCall.On("Fields").Return(mockImportCall)

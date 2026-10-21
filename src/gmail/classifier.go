@@ -123,7 +123,7 @@ func classifyEmail(raw []byte) string {
 	)
 	text := strings.ToLower(strings.Join([]string{subject, body}, "\n"))
 
-	if containsAny(text, socialPhrases) {
+	if isSocialDomain(fromDomain) || containsAny(text, socialPhrases) {
 		return categorySocial
 	}
 	if containsAny(text, updatePhrases) {
@@ -131,9 +131,6 @@ func classifyEmail(raw []byte) string {
 	}
 	if message.Header.Get("List-Unsubscribe") != "" || containsAny(text, promotionPhrases) || containsPromoWord(text) {
 		return categoryPromotions
-	}
-	if isSocialDomain(fromDomain) {
-		return categorySocial
 	}
 	return categoryPersonal
 }
@@ -160,7 +157,11 @@ func readClassifierBody(body io.Reader, contentType, transferEncoding string, us
 			if err != nil {
 				break
 			}
-			partText := readClassifierBody(part, part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"), used, depth+1)
+			disposition, _, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+			partText := ""
+			if !strings.EqualFold(disposition, "attachment") {
+				partText = readClassifierBody(part, part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"), used, depth+1)
+			}
 			if partText != "" {
 				text.WriteString(partText)
 				text.WriteByte('\n')
