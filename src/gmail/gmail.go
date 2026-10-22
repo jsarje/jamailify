@@ -170,7 +170,10 @@ func NewClient(ctx context.Context, clientID, clientSecret, refreshToken string,
 
 // PushEmail pushes a raw RFC2822 email to the authenticated user's mailbox.
 func (c *Client) PushEmail(ctx context.Context, rawRFC2822 []byte) (*PushResult, error) {
-	message := &gmail.Message{Raw: base64.RawURLEncoding.EncodeToString(rawRFC2822)}
+	message := &gmail.Message{
+		Raw:      base64.RawURLEncoding.EncodeToString(rawRFC2822),
+		LabelIds: []string{"INBOX", classifyEmail(rawRFC2822)},
+	}
 	useReceivedTime := !c.preserveOriginalTimestamps
 
 	if c.preserveOriginalTimestamps {
